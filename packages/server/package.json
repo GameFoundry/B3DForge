@@ -1,0 +1,28 @@
+{
+  "name": "@banshee-forge/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@banshee-forge/shared": "workspace:*",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "socket.io": "^4.7.2",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "tsx": "^4.6.2",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.3.0"
+  }
+}
