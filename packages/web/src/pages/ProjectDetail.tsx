@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import type { CreateBuildInput } from '@banshee-forge/shared';
 import { useProject } from '../hooks/useProjects';
 import { useBuilds, useTriggerBuild } from '../hooks/useBuilds';
+import { useBuildsUpdates } from '../hooks/useBuildsUpdates';
 import { BuildStatusBadge } from '../components/BuildStatusBadge';
 import { TriggerBuildModal } from '../components/TriggerBuildModal';
 import { ConfigurationList } from '../components/ConfigurationList';
@@ -14,6 +15,9 @@ export function ProjectDetail() {
   const triggerBuild = useTriggerBuild();
   const [showTriggerModal, setShowTriggerModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'builds' | 'configurations'>('builds');
+
+  // Listen for build status updates to refresh the list
+  useBuildsUpdates(slug);
 
   if (projectLoading) {
     return (

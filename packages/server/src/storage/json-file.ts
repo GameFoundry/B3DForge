@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { randomBytes } from 'crypto';
 
 export class JsonFileStorage {
   constructor(private basePath: string) {}
@@ -24,7 +25,21 @@ export class JsonFileStorage {
   async write<T>(filePath: string, data: T): Promise<void> {
     const fullPath = path.join(this.basePath, filePath);
     await this.ensureDir(path.dirname(fullPath));
-    await fs.writeFile(fullPath, JSON.stringify(data, null, 2), 'utf-8');
+
+    // Atomic write: write to temp file, then rename
+    const tempPath = `${fullPath}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+      await fs.rename(tempPath, fullPath);
+    } catch (error) {
+      // Clean up temp file if rename failed
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
   }
 
   async exists(filePath: string): Promise<boolean> {

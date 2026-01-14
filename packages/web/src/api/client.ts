@@ -3,6 +3,7 @@ import type {
   Build, BuildSummary, CreateBuildInput, PaginatedResponse,
   LogLine, QueueStatus, ScriptType, ScriptSource,
   BuildConfiguration, CreateConfigurationInput, UpdateConfigurationInput,
+  ConfigResponse, ConfigUpdateResponse, ConfigValidationResponse, ServerConfigUpdate,
 } from '@banshee-forge/shared';
 
 export interface ScriptResponse {
@@ -106,4 +107,17 @@ export const buildsApi = {
 // Queue API
 export const queueApi = {
   getStatus: () => fetchJson<QueueStatus>(`${API_BASE}/queue`),
+};
+
+// Config API
+export const configApi = {
+  get: () => fetchJson<ConfigResponse>(`${API_BASE}/config`),
+  update: (updates: ServerConfigUpdate) =>
+    fetchJson<ConfigUpdateResponse>(`${API_BASE}/config`, {
+      method: 'PUT', body: JSON.stringify(updates)
+    }),
+  validate: (dataPath: string) =>
+    fetchJson<ConfigValidationResponse>(`${API_BASE}/config/validate`, {
+      method: 'POST', body: JSON.stringify({ dataPath })
+    }),
 };

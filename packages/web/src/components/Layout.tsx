@@ -11,8 +11,11 @@ export function Layout() {
                 BansheeForge
               </Link>
               <div className="ml-10 flex items-center space-x-4">
-                <Link to="/projects" className="text-gray-400 hover:text-gray-100">
+                <Link to="/" className="text-gray-400 hover:text-gray-100">
                   Projects
+                </Link>
+                <Link to="/settings" className="text-gray-400 hover:text-gray-100">
+                  Settings
                 </Link>
               </div>
             </div>

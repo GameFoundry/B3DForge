@@ -145,101 +145,133 @@ export class BuildOrchestrator {
     const executor = new BuildExecutor(this.executorConfig);
     this.activeExecutors.set(buildId, executor);
 
-    // Setup event handlers
+    // Setup event handlers - all async handlers wrapped in try-catch to prevent crashes
     executor.on('log', async (lines: LogLine[]) => {
-      // Append to log file
-      const logText = lines.map(l => l.message).join('\n') + '\n';
-      await this.buildRepo.appendLog(projectSlug, buildId, logText);
+      try {
+        // Append to log file
+        const logText = lines.map(l => l.message).join('\n') + '\n';
+        await this.buildRepo.appendLog(projectSlug, buildId, logText);
 
-      // Stream to subscribed clients
-      this.io.to(`build:${buildId}`).emit('build:log', {
-        buildId,
-        lines,
-      });
+        // Stream to subscribed clients
+        this.io.to(`build:${buildId}`).emit('build:log', {
+          buildId,
+          lines,
+        });
 
-      // Update warning/error counts periodically
-      const warningCount = executor.getWarningCount();
-      const errorCount = executor.getErrorCount();
-      this.io.to(`build:${buildId}`).emit('build:stats', {
-        buildId,
-        warningCount,
-        errorCount,
-      });
+        // Update warning/error counts periodically
+        const warningCount = executor.getWarningCount();
+        const errorCount = executor.getErrorCount();
+        this.io.to(`build:${buildId}`).emit('build:stats', {
+          buildId,
+          warningCount,
+          errorCount,
+        });
+      } catch (err) {
+        console.error(`Error in log handler for build ${buildId}:`, err);
+      }
     });
 
     executor.on('phase:start', async (phase) => {
-      this.io.to(`build:${buildId}`).emit('build:phase', {
-        buildId,
-        phase,
-        action: 'start',
-      });
+      try {
+        this.io.to(`build:${buildId}`).emit('build:phase', {
+          buildId,
+          phase,
+          action: 'start',
+        });
+
+        // Save phases to database so late-joining clients see the current phase
+        await this.buildRepo.update(projectSlug, buildId, {
+          phases: executor.getPhases(),
+        });
+      } catch (err) {
+        console.error(`Error in phase:start handler for build ${buildId}:`, err);
+      }
     });
 
     executor.on('phase:end', async (phase) => {
-      // Update build with current phases
-      await this.buildRepo.update(projectSlug, buildId, {
-        phases: executor.getPhases(),
-      });
+      try {
+        // Emit socket event FIRST to maintain order with phase:start events
+        this.io.to(`build:${buildId}`).emit('build:phase', {
+          buildId,
+          phase,
+          action: 'end',
+        });
 
-      this.io.to(`build:${buildId}`).emit('build:phase', {
-        buildId,
-        phase,
-        action: 'end',
-      });
+        // Then update database
+        await this.buildRepo.update(projectSlug, buildId, {
+          phases: executor.getPhases(),
+        });
+      } catch (err) {
+        console.error(`Error in phase:end handler for build ${buildId}:`, err);
+      }
     });
 
     executor.on('complete', async (status, _exitCode) => {
-      const finalStatus: BuildStatus = status === 'success' ? 'success' : 'failed';
+      try {
+        const finalStatus: BuildStatus = status === 'success' ? 'success' : 'failed';
 
-      // Update build with final state
-      await this.buildRepo.update(projectSlug, buildId, {
-        status: finalStatus,
-        phases: executor.getPhases(),
-        warningCount: executor.getWarningCount(),
-        errorCount: executor.getErrorCount(),
-        finishedAt: new Date().toISOString(),
-      });
-
-      // Emit completion event
-      this.io.to(`build:${buildId}`).emit('build:complete', {
-        buildId,
-        status: finalStatus,
-        summary: {
-          durationMs: build.startedAt
-            ? Date.now() - new Date(build.startedAt).getTime()
-            : 0,
+        // Update build with final state
+        await this.buildRepo.update(projectSlug, buildId, {
+          status: finalStatus,
+          phases: executor.getPhases(),
           warningCount: executor.getWarningCount(),
           errorCount: executor.getErrorCount(),
-          phases: executor.getPhases(),
-        },
-      });
+          finishedAt: new Date().toISOString(),
+        });
 
-      // Global update for dashboard
-      this.io.emit('builds:updated');
+        // Emit completion event
+        this.io.to(`build:${buildId}`).emit('build:complete', {
+          buildId,
+          status: finalStatus,
+          summary: {
+            durationMs: build.startedAt
+              ? Date.now() - new Date(build.startedAt).getTime()
+              : 0,
+            warningCount: executor.getWarningCount(),
+            errorCount: executor.getErrorCount(),
+            phases: executor.getPhases(),
+          },
+        });
 
-      // Cleanup
-      this.activeExecutors.delete(buildId);
-      this.queue.markComplete(buildId);
+        // Global update for dashboard
+        this.io.emit('builds:updated');
 
-      // Trigger workspace cleanup for this project
-      this.cleanup.cleanupProject(projectSlug);
+        // Cleanup
+        this.activeExecutors.delete(buildId);
+        this.queue.markComplete(buildId);
+
+        // Trigger workspace cleanup for this project
+        this.cleanup.cleanupProject(projectSlug);
+      } catch (err) {
+        console.error(`Error in complete handler for build ${buildId}:`, err);
+        // Still try to clean up
+        this.activeExecutors.delete(buildId);
+        this.queue.markComplete(buildId);
+      }
     });
 
     executor.on('error', async (code, message) => {
-      console.error(`Build ${buildId} error [${code}]:`, message);
+      try {
+        console.error(`Build ${buildId} error [${code}]:`, message);
 
-      await this.buildRepo.appendLog(projectSlug, buildId, `\n[ERROR: ${code}] ${message}\n`);
-      await this.buildRepo.updateStatus(projectSlug, buildId, 'failed');
+        await this.buildRepo.appendLog(projectSlug, buildId, `\n[ERROR: ${code}] ${message}\n`);
+        await this.buildRepo.updateStatus(projectSlug, buildId, 'failed');
 
-      this.io.to(`build:${buildId}`).emit('build:error', {
-        buildId,
-        code,
-        message,
-      });
+        this.io.to(`build:${buildId}`).emit('build:error', {
+          buildId,
+          code,
+          message,
+        });
 
-      this.emitBuildStatus(buildId, 'failed');
-      this.activeExecutors.delete(buildId);
-      this.queue.markComplete(buildId);
+        this.emitBuildStatus(buildId, 'failed');
+        this.activeExecutors.delete(buildId);
+        this.queue.markComplete(buildId);
+      } catch (err) {
+        console.error(`Error in error handler for build ${buildId}:`, err);
+        // Still try to clean up
+        this.activeExecutors.delete(buildId);
+        this.queue.markComplete(buildId);
+      }
     });
 
     // Start execution

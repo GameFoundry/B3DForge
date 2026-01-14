@@ -1,4 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { StreamLanguage } from '@codemirror/language';
+import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { javascript } from '@codemirror/lang-javascript';
 import type { ScriptType, ScriptSource } from '@banshee-forge/shared';
 
 interface ScriptEditorProps {
@@ -99,6 +103,15 @@ export function ScriptEditor({
   };
 
   const isLocalSource = source === 'local';
+
+  // Get the appropriate language extension based on script type
+  const languageExtension = useMemo(() => {
+    if (scriptType === 'powershell') {
+      // Use JavaScript as a reasonable approximation for PowerShell
+      return javascript();
+    }
+    return StreamLanguage.define(shell);
+  }, [scriptType]);
 
   return (
     <div className="bg-gray-800 rounded-lg overflow-hidden">
@@ -216,13 +229,22 @@ export function ScriptEditor({
       {isLocalSource ? (
         <>
           <div className="relative">
-            <textarea
+            <CodeMirror
               value={script}
-              onChange={(e) => handleScriptChange(e.target.value)}
-              disabled={readOnly}
+              onChange={handleScriptChange}
+              extensions={[languageExtension]}
+              editable={!readOnly}
               placeholder={!readOnly ? (placeholder ?? `Enter your ${isTestScript ? 'test' : 'build'} script here...`) : ''}
-              className="w-full h-80 px-4 py-3 bg-gray-900 text-gray-100 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-              spellCheck={false}
+              theme="dark"
+              height="320px"
+              basicSetup={{
+                lineNumbers: true,
+                highlightActiveLineGutter: true,
+                highlightActiveLine: true,
+                foldGutter: true,
+                autocompletion: false,
+              }}
+              className="text-sm [&_.cm-editor]:!bg-gray-900 [&_.cm-gutters]:!bg-gray-900 [&_.cm-gutters]:!border-gray-700"
             />
           </div>
 

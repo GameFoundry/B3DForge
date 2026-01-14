@@ -100,6 +100,7 @@ export class BuildExecutor extends EventEmitter {
       BUILD_ID: build.id,
       CONFIGURATION_ID: configuration?.id ?? '',
       CONFIGURATION_NAME: configuration?.name ?? 'default',
+      BUILD_TYPE: configuration?.buildType ?? '',
       WORKSPACE: this.toUnixPath(workspace),
       ARTIFACTS_DIR: this.toUnixPath(artifactsDir),
       RESULTS_DIR: this.toUnixPath(resultsDir),
@@ -151,8 +152,7 @@ export class BuildExecutor extends EventEmitter {
 
     this.finishCurrentPhase('success', 0);
 
-    // Phase 2: Run build script
-    this.startPhase('build');
+    // Run build script - phases are defined by script output (e.g., [configure], [build])
     const buildResult = await this.runBashScript(bashPath, buildScriptPath, workspace, env);
 
     this.cleanup();

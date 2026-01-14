@@ -128,6 +128,7 @@ interface CreateConfigurationFormProps {
 function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfigurationFormProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [buildType, setBuildType] = useState('RelWithDebInfo');
   const [autoBuild, setAutoBuild] = useState(true);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -136,6 +137,7 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
       name,
       description: description || undefined,
       buildScript: { source: 'local' },
+      buildType: buildType || undefined,
       autoBuild,
     });
   };
@@ -163,6 +165,27 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
           placeholder="Brief description of this configuration"
           className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
         />
+      </div>
+
+      <div>
+        <label className="block text-sm text-gray-400 mb-1">Build Type</label>
+        <input
+          type="text"
+          value={buildType}
+          onChange={(e) => setBuildType(e.target.value)}
+          placeholder="e.g., Debug, Release, RelWithDebInfo"
+          list="build-types"
+          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        />
+        <datalist id="build-types">
+          <option value="Debug" />
+          <option value="Release" />
+          <option value="RelWithDebInfo" />
+          <option value="MinSizeRel" />
+        </datalist>
+        <p className="text-xs text-gray-500 mt-1">
+          Passed to build script as $BUILD_TYPE environment variable
+        </p>
       </div>
 
       <label className="flex items-center gap-2">
@@ -227,6 +250,7 @@ function ConfigurationItem({
 }: ConfigurationItemProps) {
   const [name, setName] = useState(configuration.name);
   const [description, setDescription] = useState(configuration.description ?? '');
+  const [buildType, setBuildType] = useState(configuration.buildType ?? '');
   const [autoBuild, setAutoBuild] = useState(configuration.autoBuild);
 
   // Script hooks
@@ -243,6 +267,7 @@ function ConfigurationItem({
     onSave({
       name,
       description: description || undefined,
+      buildType: buildType || undefined,
       autoBuild,
     });
   };
@@ -376,6 +401,26 @@ function ConfigurationItem({
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
                 />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Build Type</label>
+                <input
+                  type="text"
+                  value={buildType}
+                  onChange={(e) => setBuildType(e.target.value)}
+                  placeholder="e.g., Debug, Release, RelWithDebInfo"
+                  list="build-types-edit"
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
+                />
+                <datalist id="build-types-edit">
+                  <option value="Debug" />
+                  <option value="Release" />
+                  <option value="RelWithDebInfo" />
+                  <option value="MinSizeRel" />
+                </datalist>
+                <p className="text-xs text-gray-500 mt-1">
+                  Passed to build script as $BUILD_TYPE environment variable
+                </p>
               </div>
               <label className="flex items-center gap-2">
                 <input

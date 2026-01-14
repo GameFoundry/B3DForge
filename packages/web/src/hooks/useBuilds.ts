@@ -15,6 +15,7 @@ export function useBuild(id: string) {
     queryKey: ['builds', id],
     queryFn: () => buildsApi.get(id),
     enabled: !!id,
+    staleTime: 0, // Always refetch when component mounts
   });
 }
 
@@ -50,5 +51,6 @@ export function useParsedBuildLog(id: string) {
     queryKey: ['builds', id, 'log', 'parsed'],
     queryFn: () => buildsApi.getParsedLog(id),
     enabled: !!id,
+    staleTime: 0, // Always refetch when component mounts
   });
 }

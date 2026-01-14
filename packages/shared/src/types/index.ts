@@ -3,3 +3,4 @@ export * from './build.js';
 export * from './test.js';
 export * from './api.js';
 export * from './execution.js';
+export * from './config.js';

@@ -38,7 +38,10 @@ export interface BuildConfiguration {
   testScript?: ScriptConfig;         // Optional
   testScriptType?: ScriptType;       // 'bash' | 'powershell'
 
-  // Per-configuration options
+  // Build settings
+  buildType?: string;                // e.g., "Debug", "Release", "RelWithDebInfo"
+
+  // Per-build options (shown in trigger modal)
   configSchema?: ConfigSchema;       // Custom options for this config
   defaultConfig?: ProjectConfig;     // Default values
 

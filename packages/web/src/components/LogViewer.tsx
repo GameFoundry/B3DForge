@@ -16,7 +16,7 @@ export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogVi
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
       // Apply filter
-      if (filter === 'warning' && log.level !== 'warning' && log.level !== 'error') return false;
+      if (filter === 'warning' && log.level !== 'warning') return false;
       if (filter === 'error' && log.level !== 'error') return false;
       if (search && !log.message.toLowerCase().includes(search.toLowerCase())) return false;
       return true;

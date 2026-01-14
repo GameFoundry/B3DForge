@@ -9,13 +9,25 @@ import { ProjectRepository } from './repositories/project-repository.js';
 import { BuildRepository } from './repositories/build-repository.js';
 import { createProjectRoutes } from './routes/projects.js';
 import { createBuildRoutes } from './routes/builds.js';
+import { createConfigRoutes } from './routes/config.js';
 import { BuildOrchestrator } from './services/build-orchestrator.js';
+import { ConfigService } from './services/config-service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Configuration
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3003;
-const DATA_PATH = process.env.DATA_PATH ?? path.join(__dirname, '..', '..', '..', 'data');
+// App root is three directories up from compiled dist/src
+const APP_ROOT = path.join(__dirname, '..', '..', '..');
+
+// Initialize config service and load configuration
+const configService = new ConfigService(APP_ROOT);
+const { config, source: configSource } = await configService.load();
+
+const PORT = config.port;
+const DATA_PATH = config.dataPath;
+
+console.log(`Configuration loaded from: ${configSource}`);
+console.log(`Data path: ${DATA_PATH}`);
+console.log(`Port: ${PORT}`);
 
 // Initialize storage and repositories
 const storage = new JsonFileStorage(DATA_PATH);
@@ -44,6 +56,7 @@ const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, {
 // API routes - pass orchestrator to build routes
 app.use('/api/v1/projects', createProjectRoutes(projectRepo));
 app.use('/api/v1', createBuildRoutes(buildRepo, projectRepo, orchestrator));
+app.use('/api/v1/config', createConfigRoutes(configService));
 
 // Queue status endpoint
 app.get('/api/v1/queue', (_req, res) => {
@@ -90,6 +103,9 @@ async function start() {
   httpServer.listen(PORT, () => {
     console.log(`BansheeForge server listening on port ${PORT}`);
     console.log(`Data directory: ${DATA_PATH}`);
+    if (configService.hasPendingChanges()) {
+      console.log('Note: There are pending configuration changes. Restart to apply.');
+    }
   });
 }
 

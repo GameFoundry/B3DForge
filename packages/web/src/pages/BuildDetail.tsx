@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import type { LogLine, BuildPhase, BuildStatus } from '@banshee-forge/shared';
 import { useBuild, useParsedBuildLog, useCancelBuild } from '../hooks/useBuilds';
 import { useBuildSocket } from '../hooks/useBuildSocket';
@@ -9,8 +10,9 @@ import { PhaseTimeline } from '../components/PhaseTimeline';
 
 export function BuildDetail() {
   const { id } = useParams<{ id: string }>();
-  const { data: build, isLoading, refetch } = useBuild(id!);
-  const { data: parsedLog, isLoading: isLogLoading } = useParsedBuildLog(id!);
+  const queryClient = useQueryClient();
+  const { data: build, isLoading, isFetching: isBuildFetching, refetch } = useBuild(id!);
+  const { data: parsedLog, isLoading: isLogLoading, isFetching: isLogFetching, refetch: refetchLog } = useParsedBuildLog(id!);
   const cancelBuild = useCancelBuild();
 
   // Live state
@@ -21,37 +23,86 @@ export function BuildDetail() {
   const [errorCount, setErrorCount] = useState(0);
   const [liveStatus, setLiveStatus] = useState<BuildStatus | null>(null);
 
-  const isLive = build?.status === 'running' || build?.status === 'pending';
+  // Track which build ID we've loaded data for to prevent using stale cached data
+  const loadedLogForBuildId = useRef<string | null>(null);
+  const loadedPhasesForBuildId = useRef<string | null>(null);
+  const receivedLivePhaseEvents = useRef(false);
 
-  // Initialize from parsed log data
+  // Check both build data status and live status from socket
+  const effectiveStatus = liveStatus ?? build?.status;
+  const isLive = effectiveStatus === 'running' || effectiveStatus === 'pending';
+
+  // Reset state when build ID changes
   useEffect(() => {
-    if (parsedLog && !isLive) {
+    // Reset tracking refs - new build means we need fresh data
+    loadedLogForBuildId.current = null;
+    loadedPhasesForBuildId.current = null;
+    receivedLivePhaseEvents.current = false;
+
+    // Reset state
+    setLogs([]);
+    setPhases([]);
+    setCurrentPhase(undefined);
+    setWarningCount(0);
+    setErrorCount(0);
+    setLiveStatus(null);
+
+    // Force refetch fresh data for this build
+    refetch();
+    refetchLog();
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Initialize from parsed log data - only if it's for the current build and not fetching
+  useEffect(() => {
+    // Wait for fetch to complete to avoid loading stale cached data
+    if (isLogFetching) return;
+
+    // Only load if we have data and we haven't loaded for this build yet
+    if (parsedLog && id && loadedLogForBuildId.current !== id) {
+      loadedLogForBuildId.current = id;
       setLogs(parsedLog.lines);
-      setPhases(parsedLog.phases.map((name) => ({
-        name,
-        status: 'success' as const,
-        durationMs: 0,
-      })));
     }
-  }, [parsedLog, isLive]);
+  }, [parsedLog, id, isLogFetching]);
 
-  // Initialize from build data
+  // Initialize phases from build data - only if it's for the current build and not fetching
   useEffect(() => {
-    if (build) {
-      if (build.phases) {
+    // Wait for fetch to complete to avoid loading stale cached data
+    if (isBuildFetching) return;
+
+    // Only load if we have data, it's for the current build, and we haven't loaded yet
+    if (build && build.id === id && loadedPhasesForBuildId.current !== id && !receivedLivePhaseEvents.current) {
+      loadedPhasesForBuildId.current = id;
+      if (build.phases && build.phases.length > 0) {
         setPhases(build.phases);
+        // Find currently running phase
+        const running = build.phases.find(p => p.status === 'running');
+        if (running) {
+          setCurrentPhase(running.name);
+        }
       }
       setWarningCount(build.warningCount ?? 0);
       setErrorCount(build.errorCount ?? 0);
+    } else if (build && build.id === id && !isBuildFetching) {
+      // Always update counts even if we've loaded phases
+      setWarningCount(build.warningCount ?? 0);
+      setErrorCount(build.errorCount ?? 0);
     }
-  }, [build]);
+  }, [build, id, isBuildFetching]);
 
   // Socket callbacks
   const handleLog = useCallback((newLines: LogLine[]) => {
-    setLogs((prev) => [...prev, ...newLines]);
+    setLogs((prev) => {
+      // Filter out lines we already have (based on line number)
+      const existingLineNumbers = new Set(prev.map(l => l.lineNumber));
+      const uniqueNewLines = newLines.filter(l => !existingLineNumbers.has(l.lineNumber));
+      if (uniqueNewLines.length === 0) return prev;
+      return [...prev, ...uniqueNewLines];
+    });
   }, []);
 
   const handlePhase = useCallback((phase: BuildPhase, action: 'start' | 'end') => {
+    receivedLivePhaseEvents.current = true;
+
     if (action === 'start') {
       setCurrentPhase(phase.name);
       setPhases((prev) => {
@@ -64,11 +115,17 @@ export function BuildDetail() {
         return [...prev, { ...phase, status: 'running' }];
       });
     } else {
-      setPhases((prev) =>
-        prev.map((p) =>
-          p.name === phase.name ? { ...phase, status: 'success' } : p
-        )
-      );
+      setCurrentPhase(undefined);
+      setPhases((prev) => {
+        const existing = prev.find((p) => p.name === phase.name);
+        if (existing) {
+          return prev.map((p) =>
+            p.name === phase.name ? { ...phase } : p
+          );
+        }
+        // Phase wasn't in the list (missed the start event), add it
+        return [...prev, { ...phase }];
+      });
     }
   }, []);
 
@@ -84,9 +141,34 @@ export function BuildDetail() {
     setErrorCount(errors);
   }, []);
 
-  const handleComplete = useCallback(() => {
-    refetch();
-  }, [refetch]);
+  const handleComplete = useCallback(async () => {
+    // Small delay to let server finish saving final state
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Refetch build data
+    const freshBuild = await refetch();
+
+    // Only update phases if we got valid data with phases
+    if (freshBuild.data?.phases && freshBuild.data.phases.length > 0) {
+      setPhases(freshBuild.data.phases);
+    }
+    setCurrentPhase(undefined);
+
+    // Invalidate and refetch the log to get any final lines
+    queryClient.invalidateQueries({ queryKey: ['builds', id, 'log', 'parsed'] });
+    const freshLog = await refetchLog();
+
+    // Only update logs if we got more lines than we have
+    if (freshLog.data?.lines && freshLog.data.lines.length > 0) {
+      setLogs(prev => {
+        // Keep whichever has more lines
+        if (freshLog.data!.lines.length >= prev.length) {
+          return freshLog.data!.lines;
+        }
+        return prev;
+      });
+    }
+  }, [refetch, refetchLog, queryClient, id]);
 
   const { isConnected } = useBuildSocket({
     buildId: id!,
@@ -242,7 +324,7 @@ export function BuildDetail() {
         </div>
 
         {/* Log Viewer */}
-        <div className="lg:col-span-2 h-[600px]">
+        <div className="lg:col-span-2 h-[calc(100vh-22rem)]">
           {isLogLoading && !isLive ? (
             <div className="flex items-center justify-center h-full bg-gray-900 rounded-lg">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
