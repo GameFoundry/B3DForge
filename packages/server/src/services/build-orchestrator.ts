@@ -20,7 +20,6 @@ export class BuildOrchestrator {
       workspaceRoot: string;
       dataPath: string;
       defaultTimeoutMs?: number;
-      maxWorkspacesPerProject?: number;
     },
   ) {
     this.executorConfig = {
@@ -32,7 +31,6 @@ export class BuildOrchestrator {
 
     this.cleanup = new WorkspaceCleanup({
       workspaceRoot: config.workspaceRoot,
-      maxWorkspacesPerProject: config.maxWorkspacesPerProject ?? 5,
     });
 
     this.queue = new BuildQueue();

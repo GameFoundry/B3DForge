@@ -40,6 +40,7 @@ export interface BuildSummary {
   config: ProjectConfig;
   configurationId: string;           // Which configuration was used
   configurationName: string;         // Denormalized for display
+  cleanBuild: boolean;               // Whether workspace was wiped before build
   startedAt?: string;
   finishedAt?: string;
   durationMs?: number;
@@ -62,4 +63,5 @@ export interface CreateBuildInput {
   gitBranch?: string;        // Optional: defaults to project's gitBranch
   config?: ProjectConfig;    // Optional: defaults to configuration's defaultConfig
   triggeredBy?: string;
+  cleanBuild?: boolean;      // Optional: force clean workspace (wipe before build)
 }

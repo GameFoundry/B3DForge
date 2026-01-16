@@ -221,9 +221,20 @@ export function BuildDetail() {
             &larr; Back to project
           </Link>
           <h1 className="text-2xl font-bold text-gray-100">Build #{build.buildNumber}</h1>
-          <p className="text-gray-400 font-mono text-sm">
-            {build.gitBranch} @ {build.gitCommit?.slice(0, 7) ?? 'HEAD'}
-          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-gray-400 font-mono text-sm">
+              {build.gitBranch} @ {build.gitCommit?.slice(0, 7) ?? 'HEAD'}
+            </p>
+            {build.cleanBuild ? (
+              <span className="text-xs px-2 py-0.5 bg-orange-900/50 text-orange-300 rounded">
+                Clean build
+              </span>
+            ) : (
+              <span className="text-xs px-2 py-0.5 bg-cyan-900/50 text-cyan-300 rounded">
+                Incremental
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -303,6 +314,12 @@ export function BuildDetail() {
                 <dt className="text-gray-500">Finished</dt>
                 <dd className="text-gray-300">
                   {build.finishedAt ? new Date(build.finishedAt).toLocaleString() : '-'}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Workspace</dt>
+                <dd className={`${build.cleanBuild ? 'text-orange-300' : 'text-cyan-300'}`}>
+                  {build.cleanBuild ? 'Clean (fresh)' : 'Incremental (reused)'}
                 </dd>
               </div>
               {build.config && Object.keys(build.config).length > 0 && (

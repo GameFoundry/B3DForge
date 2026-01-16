@@ -1,7 +1,7 @@
 import type { BuildStatus, BuildPhase } from './build.js';
 
 // Log levels for parsed output
-export type LogLevel = 'info' | 'warning' | 'error' | 'phase';
+export type LogLevel = 'info' | 'warning' | 'error' | 'phase' | 'trace';
 
 // Parsed log line
 export interface LogLine {

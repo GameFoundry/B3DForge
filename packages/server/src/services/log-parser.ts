@@ -41,6 +41,14 @@ export function parseLine(line: string): ParseResult {
     return { level: 'phase', phase: phaseMatch[1], message: line };
   }
 
+  // Check for bash xtrace output (commands starting with + or ++)
+  // This must come before error/warning checks since traced commands may contain those words
+  const xtraceMatch = line.match(/^(\++)+ (.*)$/);
+  if (xtraceMatch) {
+    // Strip the + prefix, keep just the command
+    return { level: 'trace', message: xtraceMatch[2] };
+  }
+
   // Check for explicit markers
   const warningMatch = line.match(WARNING_MARKER);
   if (warningMatch) {

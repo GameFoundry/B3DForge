@@ -130,6 +130,7 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
   const [description, setDescription] = useState('');
   const [buildType, setBuildType] = useState('RelWithDebInfo');
   const [autoBuild, setAutoBuild] = useState(true);
+  const [forceCleanBuild, setForceCleanBuild] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +140,7 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
       buildScript: { source: 'local' },
       buildType: buildType || undefined,
       autoBuild,
+      forceCleanBuild,
     });
   };
 
@@ -198,6 +200,19 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
         <span className="text-sm text-gray-300">Include in automatic builds</span>
       </label>
 
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={forceCleanBuild}
+          onChange={(e) => setForceCleanBuild(e.target.checked)}
+          className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
+        />
+        <div>
+          <span className="text-sm text-gray-300">Always use clean builds</span>
+          <p className="text-xs text-gray-500">Wipe workspace before every build (disables incremental builds)</p>
+        </div>
+      </label>
+
       <div className="flex justify-end gap-2 pt-2">
         <button
           type="button"
@@ -252,6 +267,7 @@ function ConfigurationItem({
   const [description, setDescription] = useState(configuration.description ?? '');
   const [buildType, setBuildType] = useState(configuration.buildType ?? '');
   const [autoBuild, setAutoBuild] = useState(configuration.autoBuild);
+  const [forceCleanBuild, setForceCleanBuild] = useState(configuration.forceCleanBuild ?? false);
 
   // Script hooks
   const { data: fetchScriptData } = useConfigurationFetchScript(projectSlug, configuration.id);
@@ -269,6 +285,7 @@ function ConfigurationItem({
       description: description || undefined,
       buildType: buildType || undefined,
       autoBuild,
+      forceCleanBuild,
     });
   };
 
@@ -336,6 +353,11 @@ function ConfigurationItem({
               {configuration.autoBuild && (
                 <span className="text-xs px-2 py-0.5 bg-green-900/50 text-green-300 rounded">
                   Auto-build
+                </span>
+              )}
+              {configuration.forceCleanBuild && (
+                <span className="text-xs px-2 py-0.5 bg-orange-900/50 text-orange-300 rounded">
+                  Clean builds
                 </span>
               )}
             </div>
@@ -430,6 +452,18 @@ function ConfigurationItem({
                   className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
                 />
                 <span className="text-sm text-gray-300">Include in automatic builds</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={forceCleanBuild}
+                  onChange={(e) => setForceCleanBuild(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
+                />
+                <div>
+                  <span className="text-sm text-gray-300">Always use clean builds</span>
+                  <p className="text-xs text-gray-500">Wipe workspace before every build (disables incremental builds)</p>
+                </div>
               </label>
               <div className="flex justify-end gap-2">
                 <button

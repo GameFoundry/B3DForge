@@ -17,6 +17,7 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
   const [selectedConfigId, setSelectedConfigId] = useState(defaultConfigId);
   const [gitCommit, setGitCommit] = useState('');
   const [gitBranch, setGitBranch] = useState(project.gitBranch);
+  const [cleanBuild, setCleanBuild] = useState(false);
 
   // Get selected configuration
   const selectedConfig: BuildConfiguration | undefined = useMemo(() => {
@@ -46,6 +47,7 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
       configurationId: selectedConfigId || undefined,
       gitBranch,
       config,
+      cleanBuild,
     };
 
     if (gitCommit.trim())
@@ -199,6 +201,22 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
                 )}
               </div>
             )}
+
+            {/* Clean Build Option */}
+            <div className="border-t border-gray-700 pt-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cleanBuild}
+                  onChange={(e) => setCleanBuild(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                />
+                <div>
+                  <span className="text-gray-200">Clean build</span>
+                  <p className="text-xs text-gray-500">Wipe workspace before building (full rebuild)</p>
+                </div>
+              </label>
+            </div>
           </div>
 
           {/* Actions */}

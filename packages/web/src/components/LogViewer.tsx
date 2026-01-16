@@ -4,13 +4,13 @@ import type { LogLine } from '@banshee-forge/shared';
 interface LogViewerProps {
   logs: LogLine[];
   isLive?: boolean;
-  initialFilter?: 'all' | 'warning' | 'error';
+  initialFilter?: 'all' | 'warning' | 'error' | 'trace';
 }
 
 export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'warning' | 'error'>(initialFilter);
+  const [filter, setFilter] = useState<'all' | 'warning' | 'error' | 'trace'>(initialFilter);
   const [search, setSearch] = useState('');
 
   const filteredLogs = useMemo(() => {
@@ -18,6 +18,7 @@ export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogVi
       // Apply filter
       if (filter === 'warning' && log.level !== 'warning') return false;
       if (filter === 'error' && log.level !== 'error') return false;
+      if (filter === 'trace' && log.level !== 'trace') return false;
       if (search && !log.message.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
@@ -43,12 +44,14 @@ export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogVi
       case 'error': return 'text-red-400';
       case 'warning': return 'text-yellow-400';
       case 'phase': return 'text-blue-400 font-bold';
+      case 'trace': return 'text-gray-100 font-bold';
       default: return 'text-gray-300';
     }
   };
 
   const warningCount = logs.filter(l => l.level === 'warning').length;
   const errorCount = logs.filter(l => l.level === 'error').length;
+  const traceCount = logs.filter(l => l.level === 'trace').length;
 
   return (
     <div className="flex flex-col h-full bg-gray-900 rounded-lg overflow-hidden">
@@ -86,6 +89,15 @@ export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogVi
             }`}
           >
             <span className="text-red-400">✕</span> {errorCount}
+          </button>
+          <button
+            onClick={() => setFilter('trace')}
+            className={`px-3 py-1 rounded text-sm ${
+              filter === 'trace' ? 'bg-gray-600' : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+            title="Commands (bash xtrace)"
+          >
+            <span className="text-gray-400">$</span> {traceCount}
           </button>
         </div>
 

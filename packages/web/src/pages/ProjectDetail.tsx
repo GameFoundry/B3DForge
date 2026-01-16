@@ -192,7 +192,14 @@ export function ProjectDetail() {
                       </Link>
                     </td>
                     <td className="px-4 py-3">
-                      <BuildStatusBadge status={build.status} />
+                      <div className="flex items-center gap-2">
+                        <BuildStatusBadge status={build.status} />
+                        {build.cleanBuild && (
+                          <span className="text-xs px-1.5 py-0.5 bg-orange-900/30 text-orange-400 rounded" title="Clean build">
+                            C
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-300">
                       {build.configurationName || '-'}

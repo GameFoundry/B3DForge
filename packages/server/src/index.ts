@@ -50,7 +50,6 @@ const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, {
   workspaceRoot: path.join(DATA_PATH, 'workspaces'),
   dataPath: DATA_PATH,
   defaultTimeoutMs: 60 * 60 * 1000,
-  maxWorkspacesPerProject: 5,
 });
 
 // API routes - pass orchestrator to build routes

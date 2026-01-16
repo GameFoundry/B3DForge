@@ -48,6 +48,7 @@ export interface BuildConfiguration {
   // Settings
   timeoutMs?: number;                // Override default timeout
   autoBuild: boolean;                // Include in auto-builds
+  forceCleanBuild?: boolean;         // If true, always wipe workspace before build
 
   createdAt: string;
   updatedAt: string;

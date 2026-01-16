@@ -56,9 +56,35 @@ export class BuildExecutor extends EventEmitter {
   }
 
   async execute(build: Build, project: Project, configuration?: BuildConfiguration, timeoutMs?: number): Promise<void> {
-    const workspace = path.join(this.config.workspaceRoot, project.slug, build.id);
-    const resultsDir = path.join(workspace, 'results');
-    const artifactsDir = path.join(workspace, 'artifacts');
+    // Workspace is per-configuration (not per-build) to enable incremental builds
+    const configId = configuration?.id ?? 'default';
+    const workspace = path.join(this.config.workspaceRoot, project.slug, configId);
+
+    // Results and artifacts are per-build (stored in data directory, not workspace)
+    const buildDataDir = path.join(this.config.dataPath, 'projects', project.slug, 'builds', build.id);
+    const resultsDir = path.join(buildDataDir, 'results');
+    const artifactsDir = path.join(buildDataDir, 'artifacts');
+
+    // Determine if we need a clean build
+    const shouldClean = build.cleanBuild || configuration?.forceCleanBuild;
+
+    // Clean workspace if requested
+    if (shouldClean) {
+      try {
+        await fs.access(workspace);
+        // Workspace exists, clean it
+        this.logBuffer.push({
+          timestamp: new Date().toISOString(),
+          level: 'info',
+          phase: 'init',
+          message: 'Cleaning workspace for fresh build...',
+          lineNumber: ++this.lineNumber,
+        });
+        await fs.rm(workspace, { recursive: true, force: true });
+      } catch {
+        // Workspace doesn't exist, nothing to clean
+      }
+    }
 
     // Create directories
     try {
@@ -101,6 +127,7 @@ export class BuildExecutor extends EventEmitter {
       CONFIGURATION_ID: configuration?.id ?? '',
       CONFIGURATION_NAME: configuration?.name ?? 'default',
       BUILD_TYPE: configuration?.buildType ?? '',
+      CLEAN_BUILD: shouldClean ? '1' : '0',
       WORKSPACE: this.toUnixPath(workspace),
       ARTIFACTS_DIR: this.toUnixPath(artifactsDir),
       RESULTS_DIR: this.toUnixPath(resultsDir),
@@ -176,10 +203,12 @@ export class BuildExecutor extends EventEmitter {
     env: NodeJS.ProcessEnv
   ): Promise<{ success: boolean; exitCode: number }> {
     return new Promise((resolve) => {
+      // Inject set -x to enable xtrace (prints commands before execution)
+      // Commands will appear in output prefixed with '+ '
       this.process = spawn(bashPath, [
         '--login',
         '-c',
-        `"${this.toUnixPath(scriptPath)}"`,
+        `set -x; source "${this.toUnixPath(scriptPath)}"`,
       ], {
         cwd,
         env,
@@ -239,12 +268,12 @@ export class BuildExecutor extends EventEmitter {
           windowsHide: true,
         });
       } else {
-        // Bash
+        // Bash - inject set -x to enable xtrace (prints commands before execution)
         const bashPath = this.config.gitBashPath ?? 'bash';
         testProcess = spawn(bashPath, [
           '--login',
           '-c',
-          `"${this.toUnixPath(testScriptPath)}"`,
+          `set -x; source "${this.toUnixPath(testScriptPath)}"`,
         ], {
           cwd: workspace,
           env,
