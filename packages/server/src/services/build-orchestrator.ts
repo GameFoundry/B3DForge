@@ -1,8 +1,10 @@
 import { Server as SocketServer } from 'socket.io';
+import path from 'path';
 import type { BuildStatus, LogLine, QueueStatus } from '@banshee-forge/shared';
 import { BuildQueue } from './build-queue.js';
 import { BuildExecutor, ExecutorConfig } from './build-executor.js';
 import { WorkspaceCleanup } from './workspace-cleanup.js';
+import { TestResultsService } from './test-results-service.js';
 import { BuildRepository } from '../repositories/build-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
 
@@ -11,17 +13,20 @@ export class BuildOrchestrator {
   private activeExecutors: Map<string, BuildExecutor> = new Map();
   private cleanup: WorkspaceCleanup;
   private executorConfig: ExecutorConfig;
+  private dataPath: string;
 
   constructor(
     private io: SocketServer,
     private buildRepo: BuildRepository,
     private projectRepo: ProjectRepository,
+    private testResultsService: TestResultsService | null,
     config: {
       workspaceRoot: string;
       dataPath: string;
       defaultTimeoutMs?: number;
     },
   ) {
+    this.dataPath = config.dataPath;
     this.executorConfig = {
       workspaceRoot: config.workspaceRoot,
       dataPath: config.dataPath,
@@ -208,13 +213,51 @@ export class BuildOrchestrator {
       try {
         const finalStatus: BuildStatus = status === 'success' ? 'success' : 'failed';
 
+        // Parse test results from the results directory
+        let testSummary = undefined;
+        if (this.testResultsService) {
+          try {
+            const resultsDir = path.join(
+              this.dataPath,
+              'projects',
+              projectSlug,
+              'builds',
+              buildId,
+              'results'
+            );
+
+            const testResults = await this.testResultsService.parseAndStoreResults(
+              projectSlug,
+              buildId,
+              resultsDir
+            );
+
+            testSummary = this.testResultsService.computeTestSummary(testResults);
+
+            // Emit test results event
+            this.io.to(`build:${buildId}`).emit('test_results', {
+              buildId,
+              summary: testSummary,
+            });
+          } catch (parseErr) {
+            console.log(`No test results found for build ${buildId} (this is normal if no tests ran):`, parseErr);
+          }
+        }
+
         // Update build with final state
+        const finishedAt = new Date().toISOString();
+        const durationMs = build.startedAt
+          ? new Date(finishedAt).getTime() - new Date(build.startedAt).getTime()
+          : undefined;
+
         await this.buildRepo.update(projectSlug, buildId, {
           status: finalStatus,
           phases: executor.getPhases(),
           warningCount: executor.getWarningCount(),
           errorCount: executor.getErrorCount(),
-          finishedAt: new Date().toISOString(),
+          finishedAt,
+          durationMs,
+          testSummary,
         });
 
         // Emit completion event
@@ -228,6 +271,7 @@ export class BuildOrchestrator {
             warningCount: executor.getWarningCount(),
             errorCount: executor.getErrorCount(),
             phases: executor.getPhases(),
+            testSummary,
           },
         });
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { BuildConfiguration, Project, CreateConfigurationInput, ScriptType, ScriptSource, ScriptConfig } from '@banshee-forge/shared';
+import type { BuildConfiguration, Project, CreateConfigurationInput, ScriptSource, ScriptConfig } from '@banshee-forge/shared';
 import {
   useCreateConfiguration,
   useUpdateConfiguration,
@@ -297,12 +297,11 @@ function ConfigurationItem({
     updateBuildScript.mutate({ slug: projectSlug, configId: configuration.id, script });
   };
 
-  const handleSaveTestScript = (script: string, scriptType?: ScriptType) => {
+  const handleSaveTestScript = (script: string) => {
     updateTestScript.mutate({
       slug: projectSlug,
       configId: configuration.id,
       script,
-      scriptType: scriptType ?? 'bash',
     });
   };
 
@@ -492,7 +491,6 @@ function ConfigurationItem({
                 fileName="fetch.sh"
                 configId={configuration.id}
                 script={fetchScriptData?.script ?? ''}
-                scriptType="bash"
                 onSave={handleSaveFetchScript}
                 isSaving={updateFetchScript.isPending}
               />
@@ -504,7 +502,6 @@ function ConfigurationItem({
                 placeholder="Enter your build script here..."
                 configId={configuration.id}
                 script={buildScriptData?.script ?? ''}
-                scriptType="bash"
                 source={configuration.buildScript?.source ?? 'local'}
                 repoPath={configuration.buildScript?.repoPath ?? ''}
                 onSave={handleSaveBuildScript}
@@ -520,7 +517,6 @@ function ConfigurationItem({
                 placeholder="Enter your test script here..."
                 configId={configuration.id}
                 script={testScriptData?.script ?? ''}
-                scriptType={testScriptData?.scriptType ?? configuration.testScriptType ?? 'bash'}
                 source={configuration.testScript?.source ?? 'local'}
                 repoPath={configuration.testScript?.repoPath ?? ''}
                 onSave={handleSaveTestScript}

@@ -110,9 +110,8 @@ export class BuildExecutor extends EventEmitter {
       return;
     }
 
-    // Resolve test script path (optional, bash or PowerShell)
+    // Resolve test script path (optional, always bash)
     const testScriptPath = await this.resolveTestScript(project, configuration, workspace);
-    const testScriptType = configuration?.testScriptType ?? 'bash';
 
     // Build environment variables
     const env: NodeJS.ProcessEnv = {
@@ -133,7 +132,6 @@ export class BuildExecutor extends EventEmitter {
       RESULTS_DIR: this.toUnixPath(resultsDir),
       // Pass test script info to build script
       TEST_SCRIPT: testScriptPath ? this.toUnixPath(testScriptPath) : '',
-      TEST_SCRIPT_TYPE: testScriptType,
       // User-configured variables from build config
       ...Object.fromEntries(
         Object.entries(build.config).map(([k, v]) => [k.toUpperCase(), String(v)])
@@ -237,7 +235,7 @@ export class BuildExecutor extends EventEmitter {
   }
 
   /**
-   * Execute a test script separately (bash or PowerShell)
+   * Execute a test script separately (always bash)
    */
   async executeTestScript(
     project: Project,
@@ -250,38 +248,20 @@ export class BuildExecutor extends EventEmitter {
       return { success: true, exitCode: 0 }; // No test script is OK
     }
 
-    const scriptType = configuration?.testScriptType ?? 'bash';
-
     return new Promise((resolve) => {
-      let testProcess: ChildProcess;
-
-      if (scriptType === 'powershell') {
-        testProcess = spawn('powershell.exe', [
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy', 'Bypass',
-          '-File', testScriptPath,
-        ], {
-          cwd: workspace,
-          env,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-      } else {
-        // Bash - inject set -x to enable xtrace (prints commands before execution)
-        const bashPath = this.config.gitBashPath ?? 'bash';
-        testProcess = spawn(bashPath, [
-          '--login',
-          '-c',
-          `set -x; source "${this.toUnixPath(testScriptPath)}"`,
-        ], {
-          cwd: workspace,
-          env,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-          shell: false,
-        });
-      }
+      // Bash - inject set -x to enable xtrace (prints commands before execution)
+      const bashPath = this.config.gitBashPath ?? 'bash';
+      const testProcess = spawn(bashPath, [
+        '--login',
+        '-c',
+        `set -x; source "${this.toUnixPath(testScriptPath)}"`,
+      ], {
+        cwd: workspace,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        shell: false,
+      });
 
       testProcess.stdout?.on('data', (data: Buffer) => {
         this.processOutput(data.toString());
@@ -399,12 +379,11 @@ export class BuildExecutor extends EventEmitter {
   private async resolveTestScript(project: Project, configuration: BuildConfiguration | undefined, workspace: string): Promise<string | null> {
     if (!configuration || !configuration.testScript) return null;
 
-    const ext = configuration.testScriptType === 'powershell' ? 'ps1' : 'sh';
     return this.resolveScriptConfig(
       configuration.testScript,
       project.slug,
       workspace,
-      `test.${ext}`,
+      'test.sh',
       configuration.id
     );
   }

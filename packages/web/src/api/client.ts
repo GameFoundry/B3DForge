@@ -1,14 +1,15 @@
 import type {
   Project, CreateProjectInput, UpdateProjectInput,
   Build, BuildSummary, CreateBuildInput, PaginatedResponse,
-  LogLine, QueueStatus, ScriptType, ScriptSource,
+  LogLine, QueueStatus, ScriptSource,
   BuildConfiguration, CreateConfigurationInput, UpdateConfigurationInput,
   ConfigResponse, ConfigUpdateResponse, ConfigValidationResponse, ServerConfigUpdate,
+  BuildTestResults, UnitTestOutput, TestSuite, AggregatedSnapshotResult,
+  ComparisonResult, ReferenceInfo, ReferenceManifest,
 } from '@banshee-forge/shared';
 
 export interface ScriptResponse {
   script: string;
-  scriptType: ScriptType;
   source: ScriptSource;
 }
 
@@ -69,9 +70,9 @@ export const projectsApi = {
     }),
   getConfigurationTestScript: (slug: string, configId: string) =>
     fetchJson<ScriptResponse>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/test`),
-  updateConfigurationTestScript: (slug: string, configId: string, script: string, scriptType: ScriptType = 'bash') =>
+  updateConfigurationTestScript: (slug: string, configId: string, script: string) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/test`, {
-      method: 'PUT', body: JSON.stringify({ script, scriptType })
+      method: 'PUT', body: JSON.stringify({ script })
     }),
   deleteConfigurationTestScript: (slug: string, configId: string) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/test`, {
@@ -80,7 +81,7 @@ export const projectsApi = {
 
   // Fetch script endpoints (always local bash)
   getConfigurationFetchScript: (slug: string, configId: string) =>
-    fetchJson<{ script: string; scriptType: 'bash' }>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/fetch`),
+    fetchJson<{ script: string }>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/fetch`),
   updateConfigurationFetchScript: (slug: string, configId: string, script: string) =>
     fetchJson<{ success: boolean }>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/fetch`, {
       method: 'PUT', body: JSON.stringify({ script })
@@ -120,4 +121,58 @@ export const configApi = {
     fetchJson<ConfigValidationResponse>(`${API_BASE}/config/validate`, {
       method: 'POST', body: JSON.stringify({ dataPath })
     }),
+};
+
+// Comparison result with hasReference flag
+export interface ComparisonResultWithRef extends ComparisonResult {
+  hasReference: boolean;
+  message?: string;
+}
+
+// Tests API
+export const testsApi = {
+  getResults: (buildId: string) =>
+    fetchJson<BuildTestResults>(`${API_BASE}/builds/${buildId}/tests`),
+  getUnitTests: (buildId: string) =>
+    fetchJson<UnitTestOutput>(`${API_BASE}/builds/${buildId}/tests/unit`),
+  getTestSuite: (buildId: string, suiteId: string) =>
+    fetchJson<TestSuite>(`${API_BASE}/builds/${buildId}/tests/unit/${suiteId}`),
+  getSnapshots: (buildId: string) =>
+    fetchJson<{ snapshots: AggregatedSnapshotResult[] }>(`${API_BASE}/builds/${buildId}/tests/snapshots`),
+  getSnapshotDetails: (buildId: string, testName: string) =>
+    fetchJson<AggregatedSnapshotResult>(`${API_BASE}/builds/${buildId}/tests/snapshots/${testName}`),
+  getSnapshotLog: (buildId: string, testName: string) =>
+    fetchJson<{ log: string }>(`${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/log`),
+  compareSnapshot: (buildId: string, testName: string) =>
+    fetchJson<ComparisonResultWithRef>(`${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/compare`),
+  // URL getters for images (not fetched as JSON)
+  getScreenshotUrl: (buildId: string, testName: string) =>
+    `${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/screenshot`,
+  getDiffUrl: (buildId: string, testName: string) =>
+    `${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/diff`,
+};
+
+// References API
+export const referencesApi = {
+  listAll: (projectSlug: string) =>
+    fetchJson<{ references: Record<string, ReferenceManifest> }>(`${API_BASE}/projects/${projectSlug}/references`),
+  list: (projectSlug: string, configId: string) =>
+    fetchJson<{ references: ReferenceInfo[] }>(`${API_BASE}/projects/${projectSlug}/references/${configId}`),
+  getInfo: (projectSlug: string, configId: string, testName: string) =>
+    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}/info`),
+  setReference: (projectSlug: string, configId: string, testName: string, buildId: string) =>
+    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}`, {
+      method: 'PUT', body: JSON.stringify({ buildId })
+    }),
+  deleteReference: (projectSlug: string, configId: string, testName: string) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}`, {
+      method: 'DELETE'
+    }),
+  copyReferences: (projectSlug: string, destConfigId: string, sourceConfigId: string) =>
+    fetchJson<{ success: boolean; copiedCount: number }>(`${API_BASE}/projects/${projectSlug}/references/${destConfigId}/copy`, {
+      method: 'POST', body: JSON.stringify({ sourceConfigId })
+    }),
+  // URL getter for reference image
+  getReferenceUrl: (projectSlug: string, configId: string, testName: string) =>
+    `${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}`,
 };

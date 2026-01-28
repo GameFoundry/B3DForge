@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import path from 'path';
@@ -10,8 +11,14 @@ import { BuildRepository } from './repositories/build-repository.js';
 import { createProjectRoutes } from './routes/projects.js';
 import { createBuildRoutes } from './routes/builds.js';
 import { createConfigRoutes } from './routes/config.js';
+import { createTestRoutes } from './routes/tests.js';
+import { createReferenceRoutes } from './routes/references.js';
 import { BuildOrchestrator } from './services/build-orchestrator.js';
 import { ConfigService } from './services/config-service.js';
+import { TestResultsService } from './services/test-results-service.js';
+import { ImageComparisonService } from './services/image-comparison-service.js';
+import { TestResultsRepository } from './repositories/test-results-repository.js';
+import { ReferenceRepository } from './repositories/reference-repository.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +40,12 @@ console.log(`Port: ${PORT}`);
 const storage = new JsonFileStorage(DATA_PATH);
 const projectRepo = new ProjectRepository(storage);
 const buildRepo = new BuildRepository(storage);
+const testResultsRepo = new TestResultsRepository(storage);
+const referenceRepo = new ReferenceRepository(storage, DATA_PATH);
+
+// Initialize services
+const testResultsService = new TestResultsService(testResultsRepo);
+const imageComparisonService = new ImageComparisonService();
 
 // Create Express app
 const app = express();
@@ -46,7 +59,7 @@ const io = new SocketServer(httpServer, {
 });
 
 // Initialize orchestrator
-const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, {
+const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, testResultsService, {
   workspaceRoot: path.join(DATA_PATH, 'workspaces'),
   dataPath: DATA_PATH,
   defaultTimeoutMs: 60 * 60 * 1000,
@@ -56,6 +69,22 @@ const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, {
 app.use('/api/v1/projects', createProjectRoutes(projectRepo));
 app.use('/api/v1', createBuildRoutes(buildRepo, projectRepo, orchestrator));
 app.use('/api/v1/config', createConfigRoutes(configService));
+app.use('/api/v1', createTestRoutes(
+	testResultsService,
+	testResultsRepo,
+	imageComparisonService,
+	referenceRepo,
+	projectRepo,
+	buildRepo,
+	DATA_PATH
+));
+app.use('/api/v1', createReferenceRoutes(
+	referenceRepo,
+	testResultsRepo,
+	projectRepo,
+	buildRepo,
+	DATA_PATH
+));
 
 // Queue status endpoint
 app.get('/api/v1/queue', (_req, res) => {
@@ -72,6 +101,21 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   console.error('Server error:', err);
   res.status(500).json({ error: 'Internal server error', message: err.message });
 });
+
+// Serve static files from the web client build (only if dist exists)
+const webClientPath = path.join(APP_ROOT, 'packages', 'web', 'dist');
+const webClientExists = fs.existsSync(webClientPath);
+
+if (webClientExists) {
+  app.use(express.static(webClientPath));
+
+  // Handle client-side routing - serve index.html for all non-API routes
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/'))
+      return next();
+    res.sendFile(path.join(webClientPath, 'index.html'));
+  });
+}
 
 // Socket.IO connection handler
 io.on('connection', (socket) => {
@@ -92,7 +136,7 @@ io.on('connection', (socket) => {
 });
 
 // Export for potential programmatic use
-export { io, projectRepo, buildRepo, orchestrator };
+export { io, projectRepo, buildRepo, orchestrator, testResultsService, testResultsRepo, referenceRepo, imageComparisonService };
 
 // Start server
 async function start() {
@@ -101,6 +145,8 @@ async function start() {
 
   httpServer.listen(PORT, () => {
     console.log(`BansheeForge server listening on port ${PORT}`);
+    console.log(`  - API: http://localhost:${PORT}/api/v1`);
+    console.log(`  - UI:  ${webClientExists ? 'http://localhost:' + PORT : 'Not built (run: pnpm run build from packages/web)'}`);
     console.log(`Data directory: ${DATA_PATH}`);
     if (configService.hasPendingChanges()) {
       console.log('Note: There are pending configuration changes. Restart to apply.');

@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { StreamLanguage } from '@codemirror/language';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
-import { javascript } from '@codemirror/lang-javascript';
-import type { ScriptType, ScriptSource } from '@banshee-forge/shared';
+import type { ScriptSource } from '@banshee-forge/shared';
 
 interface ScriptEditorProps {
   title: string;
@@ -12,10 +11,9 @@ interface ScriptEditorProps {
   fileName?: string;
   configId?: string;
   script: string;
-  scriptType?: ScriptType;
   source?: ScriptSource;
   repoPath?: string;
-  onSave: (script: string, scriptType?: ScriptType) => void;
+  onSave: (script: string) => void;
   onSourceChange?: (source: ScriptSource, repoPath?: string) => void;
   onDelete?: () => void;
   isSaving?: boolean;
@@ -32,7 +30,6 @@ export function ScriptEditor({
   fileName,
   configId,
   script: initialScript,
-  scriptType: initialScriptType = 'bash',
   source: initialSource = 'local',
   repoPath: initialRepoPath = '',
   onSave,
@@ -45,7 +42,6 @@ export function ScriptEditor({
   readOnly = false,
 }: ScriptEditorProps) {
   const [script, setScript] = useState(initialScript);
-  const [scriptType, setScriptType] = useState<ScriptType>(initialScriptType);
   const [source, setSource] = useState<ScriptSource>(initialSource);
   const [repoPath, setRepoPath] = useState(initialRepoPath);
   const [hasScriptChanges, setHasScriptChanges] = useState(false);
@@ -55,10 +51,6 @@ export function ScriptEditor({
     setScript(initialScript);
     setHasScriptChanges(false);
   }, [initialScript]);
-
-  useEffect(() => {
-    setScriptType(initialScriptType);
-  }, [initialScriptType]);
 
   useEffect(() => {
     setSource(initialSource);
@@ -72,17 +64,8 @@ export function ScriptEditor({
   };
 
   const handleSaveScript = () => {
-    if (isTestScript) {
-      onSave(script, scriptType);
-    } else {
-      onSave(script);
-    }
+    onSave(script);
     setHasScriptChanges(false);
-  };
-
-  const handleTypeChange = (type: ScriptType) => {
-    setScriptType(type);
-    setHasScriptChanges(true);
   };
 
   const handleSourceChange = (newSource: ScriptSource) => {
@@ -104,14 +87,8 @@ export function ScriptEditor({
 
   const isLocalSource = source === 'local';
 
-  // Get the appropriate language extension based on script type
-  const languageExtension = useMemo(() => {
-    if (scriptType === 'powershell') {
-      // Use JavaScript as a reasonable approximation for PowerShell
-      return javascript();
-    }
-    return StreamLanguage.define(shell);
-  }, [scriptType]);
+  // Shell language extension for bash
+  const languageExtension = StreamLanguage.define(shell);
 
   return (
     <div className="bg-gray-800 rounded-lg overflow-hidden">
@@ -133,19 +110,6 @@ export function ScriptEditor({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {isTestScript && isLocalSource && !readOnly && (
-            <div className="flex items-center gap-2 mr-4">
-              <label className="text-sm text-gray-400">Type:</label>
-              <select
-                value={scriptType}
-                onChange={(e) => handleTypeChange(e.target.value as ScriptType)}
-                className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100"
-              >
-                <option value="bash">Bash</option>
-                <option value="powershell">PowerShell</option>
-              </select>
-            </div>
-          )}
           {onDelete && isLocalSource && !readOnly && (
             <button
               onClick={onDelete}
@@ -218,7 +182,7 @@ export function ScriptEditor({
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-sm"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Path relative to the repository root (e.g., .ci/build.sh or scripts/test.ps1)
+                Path relative to the repository root (e.g., .ci/build.sh or scripts/test.sh)
               </p>
             </div>
           )}
@@ -251,7 +215,7 @@ export function ScriptEditor({
           {/* Save button and file path */}
           <div className="flex items-center justify-between px-4 py-2 border-t border-gray-700 bg-gray-900/50">
             <p className="text-xs text-gray-500">
-              File: <code className="text-gray-400">configs/{configId ?? '[configId]'}/{fileName ?? (isTestScript ? `test.${scriptType === 'powershell' ? 'ps1' : 'sh'}` : 'build.sh')}</code>
+              File: <code className="text-gray-400">configs/{configId ?? '[configId]'}/{fileName ?? (isTestScript ? 'test.sh' : 'build.sh')}</code>
             </p>
             {!readOnly && (
               <button

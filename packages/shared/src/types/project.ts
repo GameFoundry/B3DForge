@@ -16,9 +16,6 @@ export type ProjectConfig = Record<string, string | boolean | number>;
 /** Script source options */
 export type ScriptSource = 'repo' | 'local' | 'custom';
 
-/** Script type for test scripts */
-export type ScriptType = 'bash' | 'powershell';
-
 /** Script configuration */
 export interface ScriptConfig {
   source: ScriptSource;
@@ -35,8 +32,7 @@ export interface BuildConfiguration {
 
   // Scripts
   buildScript: ScriptConfig;         // Always bash
-  testScript?: ScriptConfig;         // Optional
-  testScriptType?: ScriptType;       // 'bash' | 'powershell'
+  testScript?: ScriptConfig;         // Optional, always bash
 
   // Build settings
   buildType?: string;                // e.g., "Debug", "Release", "RelWithDebInfo"

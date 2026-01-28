@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCreateProject } from '../hooks/useProjects';
-import type { CreateProjectInput, ScriptType, ScriptConfig, BuildConfiguration, ConfigSchema, ProjectConfig } from '@banshee-forge/shared';
+import type { CreateProjectInput, ScriptConfig, BuildConfiguration, ConfigSchema, ProjectConfig } from '@banshee-forge/shared';
 
 export function CreateProject() {
   const navigate = useNavigate();
@@ -16,11 +16,10 @@ export function CreateProject() {
   const [buildScriptSource, setBuildScriptSource] = useState<'repo' | 'local'>('local');
   const [buildScriptRepoPath, setBuildScriptRepoPath] = useState('.ci/build.sh');
 
-  // Test script (optional, bash or powershell)
+  // Test script (optional, always bash)
   const [hasTestScript, setHasTestScript] = useState(false);
   const [testScriptSource, setTestScriptSource] = useState<'repo' | 'local'>('local');
   const [testScriptRepoPath, setTestScriptRepoPath] = useState('.ci/test.sh');
-  const [testScriptType, setTestScriptType] = useState<ScriptType>('bash');
 
   const [autoBuild, setAutoBuild] = useState(false);
   const [pollInterval, setPollInterval] = useState(300);
@@ -76,7 +75,6 @@ export function CreateProject() {
       description: 'Default build configuration',
       buildScript,
       testScript,
-      testScriptType: hasTestScript ? testScriptType : undefined,
       configSchema,
       defaultConfig: defaultConfigValues,
       autoBuild: true,
@@ -252,32 +250,6 @@ export function CreateProject() {
           {hasTestScript && (
             <>
               <div>
-                <label className="block text-sm text-gray-400 mb-2">Script Type</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      value="bash"
-                      checked={testScriptType === 'bash'}
-                      onChange={() => setTestScriptType('bash')}
-                      className="text-blue-500"
-                    />
-                    <span className="text-gray-300">Bash</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      value="powershell"
-                      checked={testScriptType === 'powershell'}
-                      onChange={() => setTestScriptType('powershell')}
-                      className="text-blue-500"
-                    />
-                    <span className="text-gray-300">PowerShell</span>
-                  </label>
-                </div>
-              </div>
-
-              <div>
                 <label className="block text-sm text-gray-400 mb-2">Script Location</label>
                 <div className="flex flex-wrap gap-4">
                   <label className="flex items-center gap-2">
@@ -310,7 +282,7 @@ export function CreateProject() {
                     type="text"
                     value={testScriptRepoPath}
                     onChange={(e) => setTestScriptRepoPath(e.target.value)}
-                    placeholder={`.ci/test.${testScriptType === 'powershell' ? 'ps1' : 'sh'}`}
+                    placeholder=".ci/test.sh"
                     className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-sm"
                   />
                   <p className="text-sm text-gray-500 mt-2">
@@ -326,7 +298,7 @@ export function CreateProject() {
                   </p>
                   <p className="text-xs text-gray-500">
                     Stored at: <code className="text-gray-400">
-                      data/projects/{generateSlug(name) || '{slug}'}/test.{testScriptType === 'powershell' ? 'ps1' : 'sh'}
+                      data/projects/{generateSlug(name) || '{slug}'}/test.sh
                     </code>
                   </p>
                 </div>

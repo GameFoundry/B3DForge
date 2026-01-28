@@ -74,3 +74,27 @@ export interface BuildTestResults {
     summary: { total: number; passed: number; failed: number };
   };
 }
+
+/** Result of comparing two images */
+export interface ComparisonResult {
+  match: boolean;
+  diffPixels: number;
+  totalPixels: number;
+  diffPercentage: number;
+  diffImagePath?: string;
+  error?: string;
+}
+
+/** Reference image info */
+export interface ReferenceInfo {
+  testName: string;
+  path: string;
+  updatedAt: string;
+  buildId: string;
+  configurationId: string;
+}
+
+/** Reference manifest for a project/configuration */
+export interface ReferenceManifest {
+  references: Record<string, ReferenceInfo>;
+}

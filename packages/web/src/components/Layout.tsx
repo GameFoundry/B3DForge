@@ -22,7 +22,7 @@ export function Layout() {
           </div>
         </div>
       </nav>
-      <main className="max-w-7xl mx-auto py-6 px-4">
+      <main className="max-w-[1800px] mx-auto py-6 px-4">
         <Outlet />
       </main>
     </div>

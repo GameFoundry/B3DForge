@@ -2,7 +2,6 @@ import type {
   Project,
   CreateProjectInput,
   UpdateProjectInput,
-  ScriptType,
   BuildConfiguration,
   CreateConfigurationInput,
   UpdateConfigurationInput,
@@ -16,7 +15,6 @@ interface ProjectsFile {
 
 export interface ScriptInfo {
   content: string;
-  scriptType?: ScriptType;  // Only for test scripts
 }
 
 export class ProjectRepository {
@@ -212,35 +210,21 @@ export class ProjectRepository {
   }
 
   async getConfigurationTestScript(slug: string, configId: string): Promise<ScriptInfo | null> {
-    const config = await this.getConfiguration(slug, configId);
-    if (!config) return null;
-
-    const scriptType = config.testScriptType ?? 'bash';
-    const ext = scriptType === 'powershell' ? 'ps1' : 'sh';
-    const content = await this.storage.readText(`projects/${slug}/configs/${configId}/test.${ext}`);
-
+    const content = await this.storage.readText(`projects/${slug}/configs/${configId}/test.sh`);
     if (content === null) return null;
-    return { content, scriptType };
+    return { content };
   }
 
   async saveConfigurationTestScript(
     slug: string,
     configId: string,
-    content: string,
-    scriptType: ScriptType
+    content: string
   ): Promise<void> {
-    const ext = scriptType === 'powershell' ? 'ps1' : 'sh';
-    await this.storage.writeText(`projects/${slug}/configs/${configId}/test.${ext}`, content);
-
-    // Update configuration's testScriptType if needed
-    const config = await this.getConfiguration(slug, configId);
-    if (config && config.testScriptType !== scriptType)
-      await this.updateConfiguration(slug, configId, { testScriptType: scriptType });
+    await this.storage.writeText(`projects/${slug}/configs/${configId}/test.sh`, content);
   }
 
   async deleteConfigurationTestScript(slug: string, configId: string): Promise<void> {
     await this.storage.delete(`projects/${slug}/configs/${configId}/test.sh`);
-    await this.storage.delete(`projects/${slug}/configs/${configId}/test.ps1`);
   }
 
   // ============================================

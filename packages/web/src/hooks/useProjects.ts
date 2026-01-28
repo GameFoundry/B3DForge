@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
   CreateProjectInput,
   UpdateProjectInput,
-  ScriptType,
   CreateConfigurationInput,
   UpdateConfigurationInput,
 } from '@banshee-forge/shared';
@@ -153,13 +152,11 @@ export function useUpdateConfigurationTestScript() {
       slug,
       configId,
       script,
-      scriptType,
     }: {
       slug: string;
       configId: string;
       script: string;
-      scriptType: ScriptType;
-    }) => projectsApi.updateConfigurationTestScript(slug, configId, script, scriptType),
+    }) => projectsApi.updateConfigurationTestScript(slug, configId, script),
     onSuccess: (_, { slug, configId }) => {
       queryClient.invalidateQueries({
         queryKey: ['projects', slug, 'configurations', configId, 'scripts', 'test'],

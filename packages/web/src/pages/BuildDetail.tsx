@@ -4,16 +4,24 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { LogLine, BuildPhase, BuildStatus } from '@banshee-forge/shared';
 import { useBuild, useParsedBuildLog, useCancelBuild } from '../hooks/useBuilds';
 import { useBuildSocket } from '../hooks/useBuildSocket';
+import { useTestResults } from '../hooks/useTestResults';
 import { BuildStatusBadge } from '../components/BuildStatusBadge';
 import { LogViewer } from '../components/LogViewer';
 import { PhaseTimeline } from '../components/PhaseTimeline';
+import { TestResultsTab } from '../components/TestResultsTab';
+
+type MainTab = 'logs' | 'tests';
 
 export function BuildDetail() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const { data: build, isLoading, isFetching: isBuildFetching, refetch } = useBuild(id!);
   const { data: parsedLog, isLoading: isLogLoading, isFetching: isLogFetching, refetch: refetchLog } = useParsedBuildLog(id!);
+  const { data: testResults } = useTestResults(id!);
   const cancelBuild = useCancelBuild();
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<MainTab>('logs');
 
   // Live state
   const [logs, setLogs] = useState<LogLine[]>([]);
@@ -290,10 +298,10 @@ export function BuildDetail() {
         </div>
       </div>
 
-      {/* Main content grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Phase Timeline */}
-        <div className="lg:col-span-1">
+      {/* Main content layout */}
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Phase Timeline - fixed width sidebar */}
+        <div className="w-full lg:w-72 xl:w-80 flex-shrink-0">
           <PhaseTimeline
             phases={phases}
             currentPhase={currentPhase}
@@ -340,19 +348,69 @@ export function BuildDetail() {
           </div>
         </div>
 
-        {/* Log Viewer */}
-        <div className="lg:col-span-2 h-[calc(100vh-22rem)]">
-          {isLogLoading && !isLive ? (
-            <div className="flex items-center justify-center h-full bg-gray-900 rounded-lg">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
-            </div>
-          ) : (
-            <LogViewer
-              logs={logs}
-              isLive={isLive}
-              initialFilter="all"
-            />
-          )}
+        {/* Log/Tests Content - takes remaining space */}
+        <div className="flex-1 min-w-0 flex flex-col h-[calc(100vh-22rem)]">
+          {/* Tab Navigation */}
+          <div className="border-b border-gray-700 mb-4">
+            <nav className="-mb-px flex space-x-6">
+              <button
+                onClick={() => setActiveTab('logs')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'logs'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
+                }`}
+              >
+                Logs
+              </button>
+              <button
+                onClick={() => setActiveTab('tests')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'tests'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
+                }`}
+              >
+                Tests
+                {testResults?.unitTests?.summary && (
+                  <span className={`ml-2 px-2 py-0.5 text-xs rounded-full ${
+                    testResults.unitTests.summary.failed > 0
+                      ? 'bg-red-900/50 text-red-300'
+                      : 'bg-green-900/50 text-green-300'
+                  }`}>
+                    {testResults.unitTests.summary.passed}/{testResults.unitTests.summary.total}
+                  </span>
+                )}
+              </button>
+            </nav>
+          </div>
+
+          {/* Tab Content */}
+          <div className="flex-1 overflow-hidden">
+            {activeTab === 'logs' && (
+              isLogLoading && !isLive ? (
+                <div className="flex items-center justify-center h-full bg-gray-900 rounded-lg">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+                </div>
+              ) : (
+                <LogViewer
+                  logs={logs}
+                  isLive={isLive}
+                  initialFilter="all"
+                />
+              )
+            )}
+
+            {activeTab === 'tests' && build && (
+              <div className="h-full overflow-y-auto bg-gray-900 rounded-lg p-4">
+                <TestResultsTab
+                  buildId={build.id}
+                  projectSlug={build.projectSlug}
+                  configurationId={build.configurationId || 'default'}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

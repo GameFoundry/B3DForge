@@ -2,7 +2,6 @@ import { Router } from 'express';
 import type {
   CreateProjectInput,
   UpdateProjectInput,
-  ScriptType,
   CreateConfigurationInput,
   UpdateConfigurationInput,
 } from '@banshee-forge/shared';
@@ -173,7 +172,6 @@ export function createProjectRoutes(projectRepo: ProjectRepository): Router {
       );
       res.json({
         script: script ?? '',
-        scriptType: 'bash' as const,
         source: config.buildScript?.source ?? 'local',
       });
     } catch (error) {
@@ -223,7 +221,6 @@ export function createProjectRoutes(projectRepo: ProjectRepository): Router {
       );
       res.json({
         script: scriptInfo?.content ?? '',
-        scriptType: scriptInfo?.scriptType ?? config.testScriptType ?? 'bash',
         source: config.testScript?.source ?? 'local',
       });
     } catch (error) {
@@ -239,25 +236,18 @@ export function createProjectRoutes(projectRepo: ProjectRepository): Router {
         res.status(404).json({ error: 'Not found', message: 'Configuration not found' });
         return;
       }
-      const { script, scriptType = 'bash' } = req.body as { script: string; scriptType?: ScriptType };
-
-      if (scriptType !== 'bash' && scriptType !== 'powershell') {
-        res.status(400).json({ error: 'Bad Request', message: 'scriptType must be "bash" or "powershell"' });
-        return;
-      }
+      const { script } = req.body as { script: string };
 
       await projectRepo.saveConfigurationTestScript(
         req.params.slug,
         req.params.configId,
-        script,
-        scriptType
+        script
       );
 
       // Update configuration to use local source if not already
       if (config.testScript?.source !== 'local') {
         await projectRepo.updateConfiguration(req.params.slug, req.params.configId, {
           testScript: { source: 'local' },
-          testScriptType: scriptType,
         });
       }
 
@@ -280,7 +270,6 @@ export function createProjectRoutes(projectRepo: ProjectRepository): Router {
       // Clear test script config
       await projectRepo.updateConfiguration(req.params.slug, req.params.configId, {
         testScript: undefined,
-        testScriptType: undefined,
       });
 
       res.json({ success: true });
@@ -307,7 +296,6 @@ export function createProjectRoutes(projectRepo: ProjectRepository): Router {
       );
       res.json({
         script: script ?? '',
-        scriptType: 'bash' as const,
       });
     } catch (error) {
       next(error);
