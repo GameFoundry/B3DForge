@@ -135,6 +135,8 @@ export const testsApi = {
     fetchJson<BuildTestResults>(`${API_BASE}/builds/${buildId}/tests`),
   getUnitTests: (buildId: string) =>
     fetchJson<UnitTestOutput>(`${API_BASE}/builds/${buildId}/tests/unit`),
+  getUnitTestLog: (buildId: string) =>
+    fetchJson<{ log: string }>(`${API_BASE}/builds/${buildId}/tests/unit/log`),
   getTestSuite: (buildId: string, suiteId: string) =>
     fetchJson<TestSuite>(`${API_BASE}/builds/${buildId}/tests/unit/${suiteId}`),
   getSnapshots: (buildId: string) =>

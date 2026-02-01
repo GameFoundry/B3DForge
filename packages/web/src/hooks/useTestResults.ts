@@ -35,6 +35,17 @@ export function useTestSuite(buildId: string, suiteId: string) {
 }
 
 /**
+ * Hook to fetch unit test console log
+ */
+export function useUnitTestLog(buildId: string, enabled = true) {
+	return useQuery({
+		queryKey: ['tests', buildId, 'unit', 'log'],
+		queryFn: () => testsApi.getUnitTestLog(buildId).then(r => r.log),
+		enabled: !!buildId && enabled,
+	});
+}
+
+/**
  * Hook to fetch snapshot test results for a build
  */
 export function useSnapshotTests(buildId: string) {

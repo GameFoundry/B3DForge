@@ -1,16 +1,20 @@
 import { useState, useMemo } from 'react';
 import type { TestSuite, TestResult } from '@banshee-forge/shared';
+import { useUnitTestLog } from '../hooks/useTestResults';
 
 interface UnitTestResultsProps {
 	suites: TestSuite[];
+	buildId: string;
 }
 
 type FilterType = 'all' | 'passed' | 'failed';
 
-export function UnitTestResults({ suites }: UnitTestResultsProps) {
+export function UnitTestResults({ suites, buildId }: UnitTestResultsProps) {
 	const [expandedSuites, setExpandedSuites] = useState<Set<string>>(new Set());
 	const [filter, setFilter] = useState<FilterType>('all');
 	const [searchQuery, setSearchQuery] = useState('');
+	const [showLog, setShowLog] = useState(false);
+	const { data: log, isLoading: logLoading, error: logError } = useUnitTestLog(buildId, showLog);
 
 	const filteredSuites = useMemo(() => {
 		return suites.map((suite, index) => {
@@ -105,6 +109,41 @@ export function UnitTestResults({ suites }: UnitTestResultsProps) {
 						Collapse All
 					</button>
 				</div>
+			</div>
+
+			{/* Console Output - Collapsible section */}
+			<div className="border border-gray-700 rounded-lg overflow-hidden">
+				<button
+					onClick={() => setShowLog(!showLog)}
+					className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-750 flex items-center justify-between text-left"
+				>
+					<div className="flex items-center gap-3">
+						{/* Terminal icon */}
+						<svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+						</svg>
+						<span className="font-medium text-gray-100">Console Output</span>
+					</div>
+					<svg className={`w-4 h-4 text-gray-400 transform transition-transform ${showLog ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+					</svg>
+				</button>
+
+				{showLog && (
+					<div className="p-4 max-h-96 overflow-y-auto bg-gray-900 border-t border-gray-700">
+						{logLoading ? (
+							<div className="text-gray-500 text-sm">Loading console output...</div>
+						) : logError ? (
+							<div className="text-gray-500 text-sm">No console output available.</div>
+						) : log ? (
+							<pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap break-words">
+								{log}
+							</pre>
+						) : (
+							<div className="text-gray-500 text-sm">No console output available.</div>
+						)}
+					</div>
+				)}
 			</div>
 
 			{/* Results */}

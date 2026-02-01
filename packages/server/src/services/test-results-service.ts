@@ -53,6 +53,9 @@ export class TestResultsService {
 				},
 				suites: unitTestOutput.suites,
 			};
+
+			// Copy unit test log file if it exists
+			await this.copyUnitTestLog(resultsDir, projectSlug, buildId);
 		}
 
 		// Parse snapshot tests
@@ -80,6 +83,39 @@ export class TestResultsService {
 		await this.repository.saveResults(projectSlug, buildId, results);
 
 		return results;
+	}
+
+	/**
+	 * Copy unit test log file to storage location
+	 */
+	private async copyUnitTestLog(
+		resultsDir: string,
+		projectSlug: string,
+		buildId: string
+	): Promise<void> {
+		const destDir = path.join(
+			this.repository['storage']['basePath'],
+			this.repository['basePath'](projectSlug, buildId),
+			'unit'
+		);
+
+		await fs.mkdir(destDir, { recursive: true });
+
+		// Try different log file locations (unit_tests.log matches unit_tests.json)
+		const logCandidates = [
+			path.join(resultsDir, 'unit_tests.log'),
+			path.join(resultsDir, 'unit_test_log.txt'),
+		];
+
+		for (const sourcePath of logCandidates) {
+			try {
+				await fs.access(sourcePath);
+				await fs.copyFile(sourcePath, path.join(destDir, 'log.txt'));
+				return;
+			} catch {
+				// Try next candidate
+			}
+		}
 	}
 
 	/**

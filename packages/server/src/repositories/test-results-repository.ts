@@ -147,4 +147,19 @@ export class TestResultsRepository {
 	async hasResults(projectSlug: string, buildId: string): Promise<boolean> {
 		return this.storage.exists(this.resultsPath(projectSlug, buildId));
 	}
+
+	/**
+	 * Get the filesystem path to the unit test log file
+	 */
+	getUnitTestLogFilePath(projectSlug: string, buildId: string): string {
+		return path.join(this.basePath(projectSlug, buildId), 'unit', 'log.txt');
+	}
+
+	/**
+	 * Get unit test log content
+	 */
+	async getUnitTestLog(projectSlug: string, buildId: string): Promise<string | null> {
+		const logPath = `${this.basePath(projectSlug, buildId)}/unit/log.txt`;
+		return this.storage.readText(logPath);
+	}
 }

@@ -77,6 +77,29 @@ export function createTestRoutes(
 		}
 	});
 
+	// GET /api/v1/builds/:buildId/tests/unit/log - Get unit test console output
+	router.get('/builds/:buildId/tests/unit/log', async (req, res, next) => {
+		try {
+			const { buildId } = req.params;
+			const projectSlug = await findProjectSlugForBuild(buildId);
+
+			if (!projectSlug) {
+				res.status(404).json({ error: 'Not found', message: 'Build not found' });
+				return;
+			}
+
+			const log = await testResultsRepository.getUnitTestLog(projectSlug, buildId);
+			if (log === null) {
+				res.status(404).json({ error: 'Not found', message: 'Unit test log not found' });
+				return;
+			}
+
+			res.json({ log });
+		} catch (error) {
+			next(error);
+		}
+	});
+
 	// GET /api/v1/builds/:buildId/tests/unit/:suiteId - Get specific test suite
 	router.get('/builds/:buildId/tests/unit/:suiteId', async (req, res, next) => {
 		try {

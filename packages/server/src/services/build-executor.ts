@@ -218,7 +218,9 @@ export class BuildExecutor extends EventEmitter {
   }
 
   /**
-   * Run a bash script and return the result
+   * Run a bash script and return the result.
+   * Waits for both stdout/stderr streams to end AND process to exit before resolving.
+   * This prevents race conditions where the process exits before all output is processed.
    */
   private runBashScript(
     bashPath: string,
@@ -241,20 +243,47 @@ export class BuildExecutor extends EventEmitter {
         shell: false,
       });
 
+      // Track completion of streams and process to avoid race conditions
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let processExited = false;
+      let exitCode = 1;
+
+      const maybeResolve = () => {
+        if (stdoutEnded && stderrEnded && processExited) {
+          resolve({ success: exitCode === 0, exitCode });
+        }
+      };
+
       this.process.stdout?.on('data', (data: Buffer) => {
         this.processOutput(data.toString());
+      });
+
+      this.process.stdout?.on('end', () => {
+        stdoutEnded = true;
+        maybeResolve();
       });
 
       this.process.stderr?.on('data', (data: Buffer) => {
         this.processOutput(data.toString());
       });
 
+      this.process.stderr?.on('end', () => {
+        stderrEnded = true;
+        maybeResolve();
+      });
+
       this.process.on('close', (code) => {
-        resolve({ success: code === 0, exitCode: code ?? 1 });
+        exitCode = code ?? 1;
+        processExited = true;
+        maybeResolve();
       });
 
       this.process.on('error', (error) => {
         this.processOutput(`Script error: ${error.message}\n`);
+        stdoutEnded = true;
+        stderrEnded = true;
+        processExited = true;
         resolve({ success: false, exitCode: 1 });
       });
     });
