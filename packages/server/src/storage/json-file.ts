@@ -2,6 +2,32 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { randomBytes } from 'crypto';
 
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 100;
+
+async function retry<T>(
+  fn: () => Promise<T>,
+  maxRetries = MAX_RETRIES,
+  delayMs = RETRY_DELAY_MS
+): Promise<T> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      // Only retry on transient Windows errors (file locked, permission denied)
+      if (err.code !== 'EPERM' && err.code !== 'EBUSY' && err.code !== 'EACCES') {
+        throw error;
+      }
+      lastError = err;
+      // Exponential backoff
+      await new Promise(resolve => setTimeout(resolve, delayMs * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError;
+}
+
 export class JsonFileStorage {
   constructor(private basePath: string) {}
 
@@ -30,7 +56,8 @@ export class JsonFileStorage {
     const tempPath = `${fullPath}.${randomBytes(6).toString('hex')}.tmp`;
     try {
       await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-      await fs.rename(tempPath, fullPath);
+      // Retry rename on Windows file locking errors
+      await retry(() => fs.rename(tempPath, fullPath));
     } catch (error) {
       // Clean up temp file if rename failed
       try {
@@ -55,7 +82,7 @@ export class JsonFileStorage {
   async delete(filePath: string): Promise<void> {
     const fullPath = path.join(this.basePath, filePath);
     try {
-      await fs.unlink(fullPath);
+      await retry(() => fs.unlink(fullPath));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw error;

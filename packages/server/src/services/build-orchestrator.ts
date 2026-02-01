@@ -286,6 +286,17 @@ export class BuildOrchestrator {
         this.cleanup.cleanupProject(projectSlug);
       } catch (err) {
         console.error(`Error in complete handler for build ${buildId}:`, err);
+        // Try to update status to failed to prevent stuck builds
+        try {
+          await this.buildRepo.updateStatus(projectSlug, buildId, 'failed');
+          this.io.to(`build:${buildId}`).emit('build:complete', {
+            buildId,
+            status: 'failed',
+          });
+          this.io.emit('builds:updated');
+        } catch (updateErr) {
+          console.error(`Failed to update build status for ${buildId}:`, updateErr);
+        }
         // Still try to clean up
         this.activeExecutors.delete(buildId);
         this.queue.markComplete(buildId);

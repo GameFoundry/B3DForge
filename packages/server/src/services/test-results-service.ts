@@ -92,7 +92,11 @@ export class TestResultsService {
 		for (const filename of candidates) {
 			const filePath = path.join(resultsDir, filename);
 			try {
-				const content = await fs.readFile(filePath, 'utf-8');
+				let content = await fs.readFile(filePath, 'utf-8');
+				// Strip UTF-8 BOM if present
+				if (content.charCodeAt(0) === 0xFEFF) {
+					content = content.slice(1);
+				}
 				const parsed = JSON.parse(content);
 
 				// Validate it's a unit test output
@@ -156,7 +160,11 @@ export class TestResultsService {
 		for (const filename of candidates) {
 			const filePath = path.join(testDir, filename);
 			try {
-				const content = await fs.readFile(filePath, 'utf-8');
+				let content = await fs.readFile(filePath, 'utf-8');
+				// Strip UTF-8 BOM if present
+				if (content.charCodeAt(0) === 0xFEFF) {
+					content = content.slice(1);
+				}
 				const parsed = JSON.parse(content);
 
 				// Validate it's a snapshot test result

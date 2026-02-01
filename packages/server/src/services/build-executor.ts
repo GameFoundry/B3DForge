@@ -180,14 +180,40 @@ export class BuildExecutor extends EventEmitter {
     // Run build script - phases are defined by script output (e.g., [configure], [build])
     const buildResult = await this.runBashScript(bashPath, buildScriptPath, workspace, env);
 
-    this.cleanup();
     this.finishCurrentPhase(buildResult.success ? 'success' : 'failed', buildResult.exitCode);
     this.flushLogBuffer();
 
     if (this.killed) {
+      this.cleanup();
       this.emit('complete', 'failed', -1);
+      return;
+    }
+
+    if (!buildResult.success) {
+      this.cleanup();
+      this.emit('complete', 'failed', buildResult.exitCode);
+      return;
+    }
+
+    // Run test script if configured and runTests is enabled
+    const shouldRunTests = build.config.runTests && testScriptPath;
+    if (shouldRunTests) {
+      this.startPhase('tests');
+      const testResult = await this.runBashScript(bashPath, testScriptPath, workspace, env);
+
+      this.finishCurrentPhase(testResult.success ? 'success' : 'failed', testResult.exitCode);
+      this.flushLogBuffer();
+
+      this.cleanup();
+
+      if (this.killed) {
+        this.emit('complete', 'failed', -1);
+      } else {
+        this.emit('complete', testResult.success ? 'success' : 'failed', testResult.exitCode);
+      }
     } else {
-      this.emit('complete', buildResult.success ? 'success' : 'failed', buildResult.exitCode);
+      this.cleanup();
+      this.emit('complete', 'success', 0);
     }
   }
 
