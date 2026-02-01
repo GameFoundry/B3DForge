@@ -212,6 +212,11 @@ export class BuildExecutor extends EventEmitter {
         this.emit('complete', testResult.success ? 'success' : 'failed', testResult.exitCode);
       }
     } else {
+      // Ensure last phase is marked complete before emitting completion
+      if (this.currentPhase && this.currentPhase.status === 'running') {
+        this.finishCurrentPhase('success', 0);
+      }
+      this.flushLogBuffer();
       this.cleanup();
       this.emit('complete', 'success', 0);
     }
@@ -529,6 +534,12 @@ export class BuildExecutor extends EventEmitter {
   }
 
   private startPhase(name: string): void {
+    // Defensive: should not start a phase while another is running
+    if (this.currentPhase && this.currentPhase.status === 'running') {
+      console.warn(`Starting phase '${name}' while '${this.currentPhase.name}' is still running - auto-finishing`);
+      this.finishCurrentPhase('success');
+    }
+
     const phase: BuildPhase = {
       name,
       status: 'running',
@@ -542,7 +553,15 @@ export class BuildExecutor extends EventEmitter {
   }
 
   private finishCurrentPhase(status: PhaseStatus, exitCode?: number): void {
-    if (!this.currentPhase) return;
+    if (!this.currentPhase) {
+      console.warn('finishCurrentPhase called with no current phase');
+      return;
+    }
+
+    if (this.currentPhase.status !== 'running') {
+      console.warn(`finishCurrentPhase called but phase '${this.currentPhase.name}' is already ${this.currentPhase.status}`);
+      return;
+    }
 
     this.currentPhase.status = status;
     this.currentPhase.finishedAt = new Date().toISOString();

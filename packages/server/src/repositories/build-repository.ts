@@ -97,67 +97,85 @@ export class BuildRepository {
   }
 
   async updateStatus(projectSlug: string, buildId: string, status: BuildStatus): Promise<Build | null> {
-    const buildPath = this.buildFilePath(projectSlug, buildId);
-    const build = await this.storage.read<Build | null>(buildPath, null);
+    const updates: Partial<Build> = { status };
 
+    if (status === 'running') {
+      // Will be handled by updateAtomic - only set startedAt if not already set
+    }
+
+    return this.updateAtomic(projectSlug, buildId, updates);
+  }
+
+  async update(projectSlug: string, buildId: string, updates: Partial<Build>): Promise<Build | null> {
+    return this.updateAtomic(projectSlug, buildId, updates);
+  }
+
+  /**
+   * Updates a build atomically, ensuring detail and index files remain consistent.
+   * Write order: detail (build.json) first, then index (builds.json).
+   * Recovery can always reconstruct index from detail files.
+   */
+  private async updateAtomic(projectSlug: string, buildId: string, updates: Partial<Build>): Promise<Build | null> {
+    const buildPath = this.buildFilePath(projectSlug, buildId);
+    const buildsPath = this.buildsFilePath(projectSlug);
+
+    // Read current state
+    const build = await this.storage.read<Build | null>(buildPath, null);
     if (!build) return null;
 
-    build.status = status;
-    if (status === 'running' && !build.startedAt) {
+    const buildsData = await this.storage.read<BuildsFile>(buildsPath, { builds: [], nextBuildNumber: 1 });
+
+    // Apply updates
+    Object.assign(build, updates);
+
+    // Handle running status - set startedAt if not already set
+    if (updates.status === 'running' && !build.startedAt) {
       build.startedAt = new Date().toISOString();
-    } else if (['success', 'failed', 'cancelled'].includes(status)) {
-      build.finishedAt = new Date().toISOString();
-      if (build.startedAt) {
+    }
+
+    // Compute derived fields if status changed to terminal
+    if (updates.status && ['success', 'failed', 'cancelled'].includes(updates.status)) {
+      if (!build.finishedAt) {
+        build.finishedAt = new Date().toISOString();
+      }
+      if (build.startedAt && !build.durationMs) {
         build.durationMs = new Date(build.finishedAt).getTime() - new Date(build.startedAt).getTime();
       }
     }
 
+    // CRITICAL: Write detail file FIRST (source of truth)
     await this.storage.write<Build>(buildPath, build);
-    await this.updateSummary(projectSlug, build);
 
-    return build;
-  }
-
-  async update(projectSlug: string, buildId: string, updates: Partial<Build>): Promise<Build | null> {
-    const buildPath = this.buildFilePath(projectSlug, buildId);
-    const build = await this.storage.read<Build | null>(buildPath, null);
-
-    if (!build) return null;
-
-    Object.assign(build, updates);
-    await this.storage.write<Build>(buildPath, build);
-    await this.updateSummary(projectSlug, build);
-
-    return build;
-  }
-
-  private async updateSummary(projectSlug: string, build: Build): Promise<void> {
-    const buildsPath = this.buildsFilePath(projectSlug);
-    const data = await this.storage.read<BuildsFile>(buildsPath, { builds: [], nextBuildNumber: 1 });
-
-    const index = data.builds.findIndex(b => b.id === build.id);
+    // THEN update index (can be reconstructed from detail if this fails)
+    const index = buildsData.builds.findIndex(b => b.id === build.id);
     if (index !== -1) {
-      data.builds[index] = {
-        id: build.id,
-        buildNumber: build.buildNumber,
-        status: build.status,
-        triggerType: build.triggerType,
-        triggeredBy: build.triggeredBy,
-        gitCommit: build.gitCommit,
-        gitBranch: build.gitBranch,
-        config: build.config,
-        configurationId: build.configurationId,
-        configurationName: build.configurationName,
-        cleanBuild: build.cleanBuild,
-        startedAt: build.startedAt,
-        finishedAt: build.finishedAt,
-        durationMs: build.durationMs,
-        warningCount: build.warningCount,
-        errorCount: build.errorCount,
-        testSummary: build.testSummary,
-      };
-      await this.storage.write<BuildsFile>(buildsPath, data);
+      buildsData.builds[index] = this.buildToSummary(build);
+      await this.storage.write<BuildsFile>(buildsPath, buildsData);
     }
+
+    return build;
+  }
+
+  private buildToSummary(build: Build): BuildSummary {
+    return {
+      id: build.id,
+      buildNumber: build.buildNumber,
+      status: build.status,
+      triggerType: build.triggerType,
+      triggeredBy: build.triggeredBy,
+      gitCommit: build.gitCommit,
+      gitBranch: build.gitBranch,
+      config: build.config,
+      configurationId: build.configurationId,
+      configurationName: build.configurationName,
+      cleanBuild: build.cleanBuild,
+      startedAt: build.startedAt,
+      finishedAt: build.finishedAt,
+      durationMs: build.durationMs,
+      warningCount: build.warningCount,
+      errorCount: build.errorCount,
+      testSummary: build.testSummary,
+    };
   }
 
   async getLog(projectSlug: string, buildId: string): Promise<string | null> {

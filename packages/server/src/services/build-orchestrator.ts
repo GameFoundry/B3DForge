@@ -1,6 +1,7 @@
 import { Server as SocketServer } from 'socket.io';
 import path from 'path';
-import type { BuildStatus, LogLine, QueueStatus } from '@banshee-forge/shared';
+import { promises as fs } from 'fs';
+import type { Build, BuildStatus, BuildSummary, LogLine, QueueStatus } from '@banshee-forge/shared';
 import { BuildQueue } from './build-queue.js';
 import { BuildExecutor, ExecutorConfig } from './build-executor.js';
 import { WorkspaceCleanup } from './workspace-cleanup.js';
@@ -88,7 +89,11 @@ export class BuildOrchestrator {
     const projects = await this.projectRepo.findAll();
 
     for (const project of projects) {
-      const { builds } = await this.buildRepo.findAllForProject(project.slug, 1, 100);
+      // Step 1: Repair index from detail files
+      await this.repairBuildsIndex(project.slug);
+
+      // Step 2: Handle interrupted builds (existing logic)
+      const { builds } = await this.buildRepo.findAllForProject(project.slug, 1, 1000);
 
       for (const build of builds) {
         if (build.status === 'running') {
@@ -113,6 +118,157 @@ export class BuildOrchestrator {
 
     // Resume processing
     this.queue.resume();
+  }
+
+  /**
+   * Repairs the builds.json index by scanning individual build.json files.
+   * Handles: status mismatches, missing entries, stale entries, incorrect nextBuildNumber.
+   */
+  private async repairBuildsIndex(projectSlug: string): Promise<void> {
+    const buildsPath = path.join(this.dataPath, 'builds', projectSlug, 'builds.json');
+
+    // Read current index
+    let indexData: { builds: BuildSummary[]; nextBuildNumber: number };
+    try {
+      const content = await fs.readFile(buildsPath, 'utf-8');
+      indexData = JSON.parse(content);
+    } catch {
+      indexData = { builds: [], nextBuildNumber: 1 };
+    }
+
+    const indexMap = new Map(indexData.builds.map(b => [b.id, b]));
+
+    // Scan build directories
+    const buildIds = await this.listBuildDirectories(projectSlug);
+    let repaired = 0;
+    let maxBuildNumber = indexData.nextBuildNumber - 1;
+
+    for (const buildId of buildIds) {
+      let build = await this.buildRepo.findById(projectSlug, buildId);
+      if (!build) continue;
+
+      // Repair stale phases in completed builds
+      const phasesRepaired = await this.repairBuildPhases(projectSlug, build);
+      if (phasesRepaired) {
+        // Re-read the build after repair
+        build = await this.buildRepo.findById(projectSlug, buildId);
+        if (!build) continue;
+        repaired++;
+      }
+
+      maxBuildNumber = Math.max(maxBuildNumber, build.buildNumber);
+
+      const indexed = indexMap.get(buildId);
+      if (!indexed) {
+        // Missing from index - add it
+        indexData.builds.push(this.buildToSummary(build));
+        repaired++;
+        console.log(`Added missing build ${buildId} to index for ${projectSlug}`);
+      } else if (indexed.status !== build.status || indexed.finishedAt !== build.finishedAt) {
+        // Status mismatch - update index from detail
+        const idx = indexData.builds.findIndex(b => b.id === buildId);
+        if (idx !== -1) {
+          indexData.builds[idx] = this.buildToSummary(build);
+          repaired++;
+          console.log(`Repaired build ${buildId} in ${projectSlug}: ${indexed.status} -> ${build.status}`);
+        }
+      }
+      indexMap.delete(buildId);
+    }
+
+    // Remove stale entries (index entries with no matching build directory)
+    for (const [staleId] of indexMap) {
+      const idx = indexData.builds.findIndex(b => b.id === staleId);
+      if (idx !== -1) {
+        indexData.builds.splice(idx, 1);
+        repaired++;
+        console.log(`Removed stale index entry ${staleId} from ${projectSlug}`);
+      }
+    }
+
+    // Ensure nextBuildNumber is correct
+    if (maxBuildNumber >= indexData.nextBuildNumber) {
+      indexData.nextBuildNumber = maxBuildNumber + 1;
+      repaired++;
+    }
+
+    if (repaired > 0) {
+      await fs.writeFile(buildsPath, JSON.stringify(indexData, null, 2), 'utf-8');
+      console.log(`Repaired ${repaired} index entries for ${projectSlug}`);
+    }
+  }
+
+  /**
+   * Repairs stale phase statuses in completed builds.
+   * If a build has terminal status but has phases stuck in 'running', mark them as finished.
+   * Returns true if any repairs were made.
+   */
+  private async repairBuildPhases(projectSlug: string, build: Build): Promise<boolean> {
+    // Only repair completed builds
+    if (!['success', 'failed', 'cancelled'].includes(build.status)) {
+      return false;
+    }
+
+    // Check if any phases are stuck in 'running'
+    const stalePhases = build.phases.filter(p => p.status === 'running');
+    if (stalePhases.length === 0) {
+      return false;
+    }
+
+    // Determine the status to assign to stale phases based on build status
+    const phaseStatus = build.status === 'success' ? 'success' : 'failed';
+    const finishedAt = build.finishedAt ?? new Date().toISOString();
+
+    // Fix each stale phase
+    for (const phase of stalePhases) {
+      phase.status = phaseStatus;
+      if (!phase.finishedAt) {
+        phase.finishedAt = finishedAt;
+        if (phase.startedAt) {
+          phase.durationMs = new Date(phase.finishedAt).getTime() - new Date(phase.startedAt).getTime();
+        }
+      }
+    }
+
+    // Save the repaired build
+    await this.buildRepo.update(projectSlug, build.id, { phases: build.phases });
+    console.log(`Repaired ${stalePhases.length} stale phase(s) in build ${build.id} (${projectSlug})`);
+
+    return true;
+  }
+
+  private async listBuildDirectories(projectSlug: string): Promise<string[]> {
+    const dirPath = path.join(this.dataPath, 'builds', projectSlug);
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      return entries
+        .filter(e => e.isDirectory())
+        .map(e => e.name);
+    } catch {
+      return [];
+    }
+  }
+
+  private buildToSummary(build: Build): BuildSummary {
+    return {
+      id: build.id,
+      buildNumber: build.buildNumber,
+      status: build.status,
+      triggerType: build.triggerType,
+      triggeredBy: build.triggeredBy,
+      gitCommit: build.gitCommit,
+      gitBranch: build.gitBranch,
+      config: build.config,
+      configurationId: build.configurationId,
+      configurationName: build.configurationName,
+      cleanBuild: build.cleanBuild,
+      startedAt: build.startedAt,
+      finishedAt: build.finishedAt,
+      durationMs: build.durationMs,
+      warningCount: build.warningCount,
+      errorCount: build.errorCount,
+      testSummary: build.testSummary,
+    };
   }
 
   private startCleanupSchedule(): void {
@@ -147,6 +303,9 @@ export class BuildOrchestrator {
     // Create executor
     const executor = new BuildExecutor(this.executorConfig);
     this.activeExecutors.set(buildId, executor);
+
+    // Track pending phase updates for completion barrier
+    const pendingPhaseUpdates: Promise<void>[] = [];
 
     // Setup event handlers - all async handlers wrapped in try-catch to prevent crashes
     executor.on('log', async (lines: LogLine[]) => {
@@ -191,26 +350,33 @@ export class BuildOrchestrator {
       }
     });
 
-    executor.on('phase:end', async (phase) => {
-      try {
-        // Emit socket event FIRST to maintain order with phase:start events
-        this.io.to(`build:${buildId}`).emit('build:phase', {
-          buildId,
-          phase,
-          action: 'end',
-        });
+    executor.on('phase:end', (phase) => {
+      // Track this async operation for completion barrier
+      const updatePromise = (async () => {
+        try {
+          // Emit socket event FIRST to maintain order with phase:start events
+          this.io.to(`build:${buildId}`).emit('build:phase', {
+            buildId,
+            phase,
+            action: 'end',
+          });
 
-        // Then update database
-        await this.buildRepo.update(projectSlug, buildId, {
-          phases: executor.getPhases(),
-        });
-      } catch (err) {
-        console.error(`Error in phase:end handler for build ${buildId}:`, err);
-      }
+          // Then update database
+          await this.buildRepo.update(projectSlug, buildId, {
+            phases: executor.getPhases(),
+          });
+        } catch (err) {
+          console.error(`Error in phase:end handler for build ${buildId}:`, err);
+        }
+      })();
+      pendingPhaseUpdates.push(updatePromise);
     });
 
     executor.on('complete', async (status, _exitCode) => {
       try {
+        // Wait for ALL pending phase updates to complete before writing final state
+        await Promise.allSettled(pendingPhaseUpdates);
+
         const finalStatus: BuildStatus = status === 'success' ? 'success' : 'failed';
 
         // Parse test results from the results directory
