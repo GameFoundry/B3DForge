@@ -83,8 +83,15 @@ export function useBuildSocket({
     });
 
     socket.on('build:complete', (data: { buildId: string; status: BuildStatus; summary: any }) => {
-      if (data.buildId === buildId && callbacksRef.current.onComplete) {
-        callbacksRef.current.onComplete(data.summary);
+      if (data.buildId === buildId) {
+        // Update status from the complete event first
+        if (callbacksRef.current.onStatus) {
+          callbacksRef.current.onStatus(data.status);
+        }
+        // Then call onComplete
+        if (callbacksRef.current.onComplete) {
+          callbacksRef.current.onComplete(data.summary);
+        }
       }
     });
 
