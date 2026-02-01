@@ -25,8 +25,8 @@ export function TestResultsTab({ buildId, projectSlug, configurationId }: TestRe
 
 	if (error) {
 		return (
-			<div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-				<p className="text-red-700">Failed to load test results: {error.message}</p>
+			<div className="p-4 bg-red-900/30 border border-red-800 rounded-lg">
+				<p className="text-red-300">Failed to load test results: {error.message}</p>
 			</div>
 		);
 	}
@@ -55,19 +55,19 @@ export function TestResultsTab({ buildId, projectSlug, configurationId }: TestRe
 			{/* Summary Cards */}
 			<div className="grid grid-cols-2 gap-4">
 				{hasUnitTests && unitSummary && (
-					<div className="bg-white border rounded-lg p-4">
-						<h3 className="text-sm font-medium text-gray-500 mb-2">Unit Tests</h3>
+					<div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+						<h3 className="text-sm font-medium text-gray-400 mb-2">Unit Tests</h3>
 						<div className="flex items-baseline space-x-4">
-							<span className="text-2xl font-bold text-gray-900">
+							<span className="text-2xl font-bold text-gray-100">
 								{unitSummary.passed}/{unitSummary.total}
 							</span>
 							{unitSummary.failed > 0 && (
-								<span className="text-red-600 font-medium">
+								<span className="text-red-400 font-medium">
 									{unitSummary.failed} failed
 								</span>
 							)}
 							{unitSummary.failed === 0 && (
-								<span className="text-green-600 font-medium">
+								<span className="text-green-400 font-medium">
 									All passed
 								</span>
 							)}
@@ -76,19 +76,19 @@ export function TestResultsTab({ buildId, projectSlug, configurationId }: TestRe
 				)}
 
 				{hasSnapshots && snapshotSummary && (
-					<div className="bg-white border rounded-lg p-4">
-						<h3 className="text-sm font-medium text-gray-500 mb-2">Snapshot Tests</h3>
+					<div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+						<h3 className="text-sm font-medium text-gray-400 mb-2">Snapshot Tests</h3>
 						<div className="flex items-baseline space-x-4">
-							<span className="text-2xl font-bold text-gray-900">
+							<span className="text-2xl font-bold text-gray-100">
 								{snapshotSummary.passed}/{snapshotSummary.total}
 							</span>
 							{snapshotSummary.failed > 0 && (
-								<span className="text-red-600 font-medium">
+								<span className="text-red-400 font-medium">
 									{snapshotSummary.failed} failed
 								</span>
 							)}
 							{snapshotSummary.failed === 0 && (
-								<span className="text-green-600 font-medium">
+								<span className="text-green-400 font-medium">
 									All passed
 								</span>
 							)}
@@ -98,20 +98,20 @@ export function TestResultsTab({ buildId, projectSlug, configurationId }: TestRe
 			</div>
 
 			{/* Tab Navigation */}
-			<div className="border-b border-gray-200">
+			<div className="border-b border-gray-700">
 				<nav className="-mb-px flex space-x-8">
 					{hasUnitTests && (
 						<button
 							onClick={() => setActiveTab('unit')}
 							className={`py-2 px-1 border-b-2 font-medium text-sm ${
 								activeTab === 'unit'
-									? 'border-blue-500 text-blue-600'
-									: 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+									? 'border-blue-500 text-blue-400'
+									: 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
 							}`}
 						>
 							Unit Tests
 							{unitSummary && (
-								<span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100">
+								<span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-700 text-gray-300">
 									{unitSummary.total}
 								</span>
 							)}
@@ -123,13 +123,13 @@ export function TestResultsTab({ buildId, projectSlug, configurationId }: TestRe
 							onClick={() => setActiveTab('snapshots')}
 							className={`py-2 px-1 border-b-2 font-medium text-sm ${
 								activeTab === 'snapshots'
-									? 'border-blue-500 text-blue-600'
-									: 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+									? 'border-blue-500 text-blue-400'
+									: 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
 							}`}
 						>
 							Snapshot Tests
 							{snapshotSummary && (
-								<span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100">
+								<span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-700 text-gray-300">
 									{snapshotSummary.total}
 								</span>
 							)}

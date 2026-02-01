@@ -65,18 +65,18 @@ export function SnapshotComparisonModal({
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
 			{/* Modal Container */}
-			<div className="w-full h-full max-w-7xl max-h-[90vh] m-4 bg-white rounded-lg shadow-xl flex flex-col overflow-hidden">
+			<div className="w-full h-full max-w-7xl max-h-[90vh] m-4 bg-gray-900 rounded-lg shadow-xl flex flex-col overflow-hidden border border-gray-700">
 				{/* Header */}
-				<div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
+				<div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800">
 					<div className="flex items-center gap-4">
-						<h2 className="text-lg font-semibold">{testName}</h2>
+						<h2 className="text-lg font-semibold text-gray-100">{testName}</h2>
 						{details && (
 							<span className={`px-2 py-1 text-sm rounded-full ${
 								details.statusText === 'passed'
-									? 'bg-green-100 text-green-700'
+									? 'bg-green-900/50 text-green-300'
 									: details.statusText === 'failed'
-										? 'bg-red-100 text-red-700'
-										: 'bg-yellow-100 text-yellow-700'
+										? 'bg-red-900/50 text-red-300'
+										: 'bg-yellow-900/50 text-yellow-300'
 							}`}>
 								{details.statusText.replace('_', ' ')}
 							</span>
@@ -96,7 +96,7 @@ export function SnapshotComparisonModal({
 						{/* Close Button */}
 						<button
 							onClick={onClose}
-							className="p-1.5 text-gray-500 hover:text-gray-700 rounded hover:bg-gray-100"
+							className="p-1.5 text-gray-400 hover:text-gray-200 rounded hover:bg-gray-700"
 							title="Close (Esc)"
 						>
 							<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -125,20 +125,20 @@ export function SnapshotComparisonModal({
 					</div>
 
 					{/* Sidebar */}
-					<div className="w-72 border-l bg-gray-50 overflow-y-auto">
+					<div className="w-72 border-l border-gray-700 bg-gray-800 overflow-y-auto">
 						<div className="p-4 space-y-4">
 							{/* Test Info */}
 							{details && (
 								<div>
-									<h3 className="text-sm font-medium text-gray-500 mb-2">Test Info</h3>
+									<h3 className="text-sm font-medium text-gray-400 mb-2">Test Info</h3>
 									<dl className="space-y-1 text-sm">
 										<div className="flex justify-between">
 											<dt className="text-gray-500">Frames</dt>
-											<dd className="text-gray-900">{details.totalFrames}</dd>
+											<dd className="text-gray-200">{details.totalFrames}</dd>
 										</div>
 										<div className="flex justify-between">
 											<dt className="text-gray-500">Duration</dt>
-											<dd className="text-gray-900">{details.executionTimeSeconds.toFixed(2)}s</dd>
+											<dd className="text-gray-200">{details.executionTimeSeconds.toFixed(2)}s</dd>
 										</div>
 									</dl>
 								</div>
@@ -147,28 +147,28 @@ export function SnapshotComparisonModal({
 							{/* Comparison Info */}
 							{comparison && (
 								<div>
-									<h3 className="text-sm font-medium text-gray-500 mb-2">Comparison</h3>
+									<h3 className="text-sm font-medium text-gray-400 mb-2">Comparison</h3>
 									{comparison.hasReference ? (
 										<dl className="space-y-1 text-sm">
 											<div className="flex justify-between">
 												<dt className="text-gray-500">Match</dt>
-												<dd className={comparison.match ? 'text-green-600' : 'text-red-600'}>
+												<dd className={comparison.match ? 'text-green-400' : 'text-red-400'}>
 													{comparison.match ? 'Yes' : 'No'}
 												</dd>
 											</div>
 											<div className="flex justify-between">
 												<dt className="text-gray-500">Difference</dt>
-												<dd className="text-gray-900">{comparison.diffPercentage?.toFixed(4)}%</dd>
+												<dd className="text-gray-200">{comparison.diffPercentage?.toFixed(4)}%</dd>
 											</div>
 											{comparison.diffPixels !== undefined && comparison.diffPixels > 0 && (
 												<div className="flex justify-between">
 													<dt className="text-gray-500">Diff Pixels</dt>
-													<dd className="text-gray-900">{comparison.diffPixels.toLocaleString()}</dd>
+													<dd className="text-gray-200">{comparison.diffPixels.toLocaleString()}</dd>
 												</div>
 											)}
 										</dl>
 									) : (
-										<p className="text-sm text-gray-500">
+										<p className="text-sm text-gray-400">
 											No reference image set. Click "Set as Reference" to use this screenshot as the baseline.
 										</p>
 									)}
@@ -178,12 +178,12 @@ export function SnapshotComparisonModal({
 							{/* Errors */}
 							{details?.errors && details.errors.length > 0 && (
 								<div>
-									<h3 className="text-sm font-medium text-red-600 mb-2">
+									<h3 className="text-sm font-medium text-red-400 mb-2">
 										Errors ({details.errors.length})
 									</h3>
 									<ul className="space-y-1">
 										{details.errors.map((error, i) => (
-											<li key={i} className="text-sm text-red-700 bg-red-50 p-2 rounded">
+											<li key={i} className="text-sm text-red-300 bg-red-900/30 border border-red-800 p-2 rounded">
 												{error}
 											</li>
 										))}
@@ -194,12 +194,12 @@ export function SnapshotComparisonModal({
 							{/* Warnings */}
 							{details?.warnings && details.warnings.length > 0 && (
 								<div>
-									<h3 className="text-sm font-medium text-yellow-600 mb-2">
+									<h3 className="text-sm font-medium text-yellow-400 mb-2">
 										Warnings ({details.warnings.length})
 									</h3>
 									<ul className="space-y-1">
 										{details.warnings.map((warning, i) => (
-											<li key={i} className="text-sm text-yellow-700 bg-yellow-50 p-2 rounded">
+											<li key={i} className="text-sm text-yellow-300 bg-yellow-900/30 border border-yellow-800 p-2 rounded">
 												{warning}
 											</li>
 										))}
@@ -208,13 +208,13 @@ export function SnapshotComparisonModal({
 							)}
 
 							{/* Actions */}
-							<div className="pt-4 border-t">
-								<h3 className="text-sm font-medium text-gray-500 mb-2">Actions</h3>
+							<div className="pt-4 border-t border-gray-700">
+								<h3 className="text-sm font-medium text-gray-400 mb-2">Actions</h3>
 								<div className="space-y-2">
 									<a
 										href={screenshotUrl}
 										download={`${testName}_screenshot.png`}
-										className="block w-full px-3 py-2 text-sm text-center border border-gray-300 rounded hover:bg-gray-50"
+										className="block w-full px-3 py-2 text-sm text-center text-gray-200 border border-gray-600 rounded hover:bg-gray-700"
 									>
 										Download Screenshot
 									</a>
@@ -222,7 +222,7 @@ export function SnapshotComparisonModal({
 										<a
 											href={referenceUrl}
 											download={`${testName}_reference.png`}
-											className="block w-full px-3 py-2 text-sm text-center border border-gray-300 rounded hover:bg-gray-50"
+											className="block w-full px-3 py-2 text-sm text-center text-gray-200 border border-gray-600 rounded hover:bg-gray-700"
 										>
 											Download Reference
 										</a>

@@ -107,13 +107,13 @@ export function ImageComparisonViewer({
 	return (
 		<div className="flex flex-col h-full">
 			{/* Toolbar */}
-			<div className="flex items-center justify-between p-2 bg-gray-100 border-b">
+			<div className="flex items-center justify-between p-2 bg-gray-800 border-b border-gray-700">
 				<div className="flex items-center gap-2">
 					{/* Mode Selector */}
-					<div className="flex border border-gray-300 rounded-md overflow-hidden bg-white">
+					<div className="flex border border-gray-600 rounded-md overflow-hidden">
 						<button
 							onClick={() => handleModeChange('slider')}
-							className={`px-3 py-1.5 text-sm ${mode === 'slider' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+							className={`px-3 py-1.5 text-sm ${mode === 'slider' ? 'bg-blue-900/50 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
 							disabled={!hasReference}
 							title="Slider comparison (1)"
 						>
@@ -121,7 +121,7 @@ export function ImageComparisonViewer({
 						</button>
 						<button
 							onClick={() => handleModeChange('side-by-side')}
-							className={`px-3 py-1.5 text-sm border-l ${mode === 'side-by-side' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+							className={`px-3 py-1.5 text-sm border-l border-gray-600 ${mode === 'side-by-side' ? 'bg-blue-900/50 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
 							disabled={!hasReference}
 							title="Side-by-side (2)"
 						>
@@ -130,7 +130,7 @@ export function ImageComparisonViewer({
 						{hasDiff && (
 							<button
 								onClick={() => handleModeChange('diff')}
-								className={`px-3 py-1.5 text-sm border-l ${mode === 'diff' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}
+								className={`px-3 py-1.5 text-sm border-l border-gray-600 ${mode === 'diff' ? 'bg-blue-900/50 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
 								title="Diff overlay (3)"
 							>
 								Diff
@@ -140,7 +140,7 @@ export function ImageComparisonViewer({
 
 					{diffPercentage !== undefined && (
 						<span className={`px-2 py-1 text-sm rounded ${
-							diffPercentage === 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+							diffPercentage === 0 ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'
 						}`}>
 							{diffPercentage === 0 ? 'Identical' : `${diffPercentage.toFixed(2)}% difference`}
 						</span>
@@ -151,24 +151,24 @@ export function ImageComparisonViewer({
 				<div className="flex items-center gap-2">
 					<button
 						onClick={() => handleZoom(-0.25)}
-						className="px-2 py-1 text-sm border border-gray-300 rounded bg-white hover:bg-gray-50"
+						className="px-2 py-1 text-sm border border-gray-600 rounded text-gray-300 hover:bg-gray-700"
 						title="Zoom out (-)"
 					>
 						−
 					</button>
-					<span className="text-sm text-gray-600 w-16 text-center">
+					<span className="text-sm text-gray-400 w-16 text-center">
 						{Math.round(zoom * 100)}%
 					</span>
 					<button
 						onClick={() => handleZoom(0.25)}
-						className="px-2 py-1 text-sm border border-gray-300 rounded bg-white hover:bg-gray-50"
+						className="px-2 py-1 text-sm border border-gray-600 rounded text-gray-300 hover:bg-gray-700"
 						title="Zoom in (+)"
 					>
 						+
 					</button>
 					<button
 						onClick={handleReset}
-						className="px-3 py-1 text-sm border border-gray-300 rounded bg-white hover:bg-gray-50"
+						className="px-3 py-1 text-sm border border-gray-600 rounded text-gray-300 hover:bg-gray-700"
 						title="Reset (0)"
 					>
 						Reset
@@ -229,7 +229,7 @@ export function ImageComparisonViewer({
 			</div>
 
 			{/* Help text */}
-			<div className="p-2 bg-gray-50 text-xs text-gray-500 border-t">
+			<div className="p-2 bg-gray-800 text-xs text-gray-500 border-t border-gray-700">
 				Drag to pan · Scroll or +/- to zoom · Keys 1-3 to switch modes
 			</div>
 		</div>

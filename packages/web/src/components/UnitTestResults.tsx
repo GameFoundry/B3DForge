@@ -13,7 +13,7 @@ export function UnitTestResults({ suites }: UnitTestResultsProps) {
 	const [searchQuery, setSearchQuery] = useState('');
 
 	const filteredSuites = useMemo(() => {
-		return suites.map(suite => {
+		return suites.map((suite, index) => {
 			let filteredTests = suite.tests;
 
 			// Filter by status
@@ -35,24 +35,26 @@ export function UnitTestResults({ suites }: UnitTestResultsProps) {
 			return {
 				...suite,
 				tests: filteredTests,
+				// Use original index as unique ID since suite names may not be unique
+				id: `suite-${index}`,
 			};
 		}).filter(suite => suite.tests.length > 0);
 	}, [suites, filter, searchQuery]);
 
-	const toggleSuite = (suiteName: string) => {
+	const toggleSuite = (suiteId: string) => {
 		setExpandedSuites(prev => {
 			const next = new Set(prev);
-			if (next.has(suiteName)) {
-				next.delete(suiteName);
+			if (next.has(suiteId)) {
+				next.delete(suiteId);
 			} else {
-				next.add(suiteName);
+				next.add(suiteId);
 			}
 			return next;
 		});
 	};
 
 	const expandAll = () => {
-		setExpandedSuites(new Set(suites.map(s => s.name)));
+		setExpandedSuites(new Set(filteredSuites.map(s => s.id)));
 	};
 
 	const collapseAll = () => {
@@ -75,14 +77,14 @@ export function UnitTestResults({ suites }: UnitTestResultsProps) {
 						placeholder="Search tests..."
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
-						className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 					/>
 				</div>
 
 				<select
 					value={filter}
 					onChange={(e) => setFilter(e.target.value as FilterType)}
-					className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+					className="px-3 py-2 bg-gray-800 border border-gray-600 rounded-md text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
 				>
 					<option value="all">All Tests</option>
 					<option value="passed">Passed Only</option>
@@ -92,13 +94,13 @@ export function UnitTestResults({ suites }: UnitTestResultsProps) {
 				<div className="flex gap-2">
 					<button
 						onClick={expandAll}
-						className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900"
+						className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200"
 					>
 						Expand All
 					</button>
 					<button
 						onClick={collapseAll}
-						className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900"
+						className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200"
 					>
 						Collapse All
 					</button>
@@ -113,21 +115,21 @@ export function UnitTestResults({ suites }: UnitTestResultsProps) {
 			) : (
 				<div className="space-y-2">
 					{filteredSuites.map(suite => (
-						<div key={suite.name} className="border rounded-lg overflow-hidden">
+						<div key={suite.id} className="border border-gray-700 rounded-lg overflow-hidden">
 							{/* Suite Header */}
 							<button
-								onClick={() => toggleSuite(suite.name)}
-								className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between text-left"
+								onClick={() => toggleSuite(suite.id)}
+								className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-750 flex items-center justify-between text-left"
 							>
 								<div className="flex items-center gap-3">
-									<span className={`transform transition-transform ${expandedSuites.has(suite.name) ? 'rotate-90' : ''}`}>
+									<span className={`transform transition-transform text-gray-400 ${expandedSuites.has(suite.id) ? 'rotate-90' : ''}`}>
 										▶
 									</span>
-									<span className="font-medium">{suite.name}</span>
+									<span className="font-medium text-gray-100">{suite.name}</span>
 									<span className={`px-2 py-0.5 text-xs rounded-full ${
 										suite.failedTests > 0
-											? 'bg-red-100 text-red-700'
-											: 'bg-green-100 text-green-700'
+											? 'bg-red-900/50 text-red-300'
+											: 'bg-green-900/50 text-green-300'
 									}`}>
 										{suite.passedTests}/{suite.totalTests}
 									</span>
@@ -138,8 +140,8 @@ export function UnitTestResults({ suites }: UnitTestResultsProps) {
 							</button>
 
 							{/* Suite Tests */}
-							{expandedSuites.has(suite.name) && (
-								<div className="divide-y divide-gray-100">
+							{expandedSuites.has(suite.id) && (
+								<div className="divide-y divide-gray-700">
 									{suite.tests.map((test, index) => (
 										<TestResultRow key={index} test={test} formatDuration={formatDuration} />
 									))}
@@ -157,18 +159,18 @@ function TestResultRow({ test, formatDuration }: { test: TestResult; formatDurat
 	const [expanded, setExpanded] = useState(!test.passed && !!test.failures?.length);
 
 	return (
-		<div className="bg-white">
+		<div className="bg-gray-850">
 			<div
-				className={`px-4 py-2 flex items-center justify-between ${test.failures?.length ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+				className={`px-4 py-2 flex items-center justify-between ${test.failures?.length ? 'cursor-pointer hover:bg-gray-800' : ''}`}
 				onClick={() => test.failures?.length && setExpanded(!expanded)}
 			>
 				<div className="flex items-center gap-3">
 					{test.passed ? (
-						<span className="text-green-500">✓</span>
+						<span className="text-green-400">✓</span>
 					) : (
-						<span className="text-red-500">✗</span>
+						<span className="text-red-400">✗</span>
 					)}
-					<span className={test.passed ? 'text-gray-700' : 'text-red-700 font-medium'}>
+					<span className={test.passed ? 'text-gray-300' : 'text-red-400 font-medium'}>
 						{test.name}
 					</span>
 				</div>
@@ -181,9 +183,9 @@ function TestResultRow({ test, formatDuration }: { test: TestResult; formatDurat
 			{expanded && test.failures && test.failures.length > 0 && (
 				<div className="px-4 pb-3 pl-10">
 					{test.failures.map((failure, index) => (
-						<div key={index} className="mt-2 p-3 bg-red-50 rounded-md text-sm">
-							<p className="text-red-800">{failure.description}</p>
-							<p className="text-red-600 mt-1 font-mono text-xs">
+						<div key={index} className="mt-2 p-3 bg-red-900/30 border border-red-800 rounded-md text-sm">
+							<p className="text-red-300">{failure.description}</p>
+							<p className="text-red-400 mt-1 font-mono text-xs">
 								{failure.file}:{failure.line}
 								{failure.function && ` in ${failure.function}`}
 							</p>
