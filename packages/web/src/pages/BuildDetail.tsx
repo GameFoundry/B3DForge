@@ -157,6 +157,9 @@ export function BuildDetail() {
     // Refetch build data
     const freshBuild = await refetch();
 
+    // Invalidate test results cache so tabs update
+    queryClient.invalidateQueries({ queryKey: ['tests', id] });
+
     // Only update phases if we got valid data with phases
     if (freshBuild.data?.phases && freshBuild.data.phases.length > 0) {
       setPhases(freshBuild.data.phases);
