@@ -39,7 +39,7 @@ export interface UnitTestOutput {
 }
 
 /** Snapshot test status */
-export type SnapshotTestStatus = 'passed' | 'failed' | 'passed_with_warnings';
+export type SnapshotTestStatus = 'passed' | 'failed' | 'passed_with_warnings' | 'crashed';
 
 /** Snapshot test result (from SnapshotTestRunner) */
 export interface SnapshotTestResult {

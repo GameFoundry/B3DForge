@@ -62,7 +62,9 @@ export class TestResultsService {
 		const snapshotResults = await this.parseSnapshotTests(resultsDir, projectSlug, buildId);
 		if (snapshotResults.length > 0) {
 			const passed = snapshotResults.filter(r => r.statusText === 'passed').length;
-			const failed = snapshotResults.filter(r => r.statusText === 'failed').length;
+			const failed = snapshotResults.filter(r =>
+				r.statusText === 'failed' || r.statusText === 'crashed'
+			).length;
 
 			results.snapshotTests = {
 				results: snapshotResults,
@@ -173,6 +175,15 @@ export class TestResultsService {
 					// Copy files to storage and update paths
 					await this.copySnapshotFiles(testDir, projectSlug, buildId, testName, result);
 					results.push(result);
+				} else {
+					// No result.json found - test crashed
+					const crashedResult = await this.createCrashedSnapshotResult(
+						testDir,
+						testName,
+						projectSlug,
+						buildId
+					);
+					results.push(crashedResult);
 				}
 			}
 		} catch {
@@ -273,6 +284,126 @@ export class TestResultsService {
 		}
 
 		// Save result.json to storage
+		await fs.writeFile(
+			path.join(destDir, 'result.json'),
+			JSON.stringify(result, null, 2)
+		);
+	}
+
+	/**
+	 * Create a synthetic result for a crashed snapshot test
+	 */
+	private async createCrashedSnapshotResult(
+		testDir: string,
+		testName: string,
+		projectSlug: string,
+		buildId: string
+	): Promise<AggregatedSnapshotResult> {
+		const errors: string[] = [];
+
+		// Try to extract error info from log.txt if it exists
+		const logCandidates = [`${testName}_log.txt`, 'log.txt', `${testName}.log`];
+
+		let logContent: string | null = null;
+		for (const filename of logCandidates) {
+			const logPath = path.join(testDir, filename);
+			try {
+				logContent = await fs.readFile(logPath, 'utf-8');
+				break;
+			} catch {
+				// Try next candidate
+			}
+		}
+
+		// Extract last few lines from log if available
+		if (logContent) {
+			const lines = logContent.trim().split('\n');
+			const lastLines = lines.slice(-10);
+			const errorLines = lastLines.filter(line =>
+				/error|crash|exception|failed|abort|segfault|access violation/i.test(line)
+			);
+			if (errorLines.length > 0) {
+				errors.push(...errorLines.slice(0, 5));
+			} else if (lines.length > 0) {
+				errors.push(`Test crashed. Last log line: ${lines[lines.length - 1]}`);
+			}
+		}
+
+		if (errors.length === 0) {
+			errors.push('Test crashed without producing result.json');
+		}
+
+		const crashedResult: AggregatedSnapshotResult = {
+			type: 'snapshot_test',
+			testName,
+			status: -1,
+			statusText: 'crashed',
+			totalFrames: 0,
+			executionTimeSeconds: 0,
+			screenshotPath: '',
+			errors,
+			warnings: [],
+		};
+
+		// Copy any available files and save result
+		await this.copyCrashedSnapshotFiles(testDir, projectSlug, buildId, testName, crashedResult);
+
+		return crashedResult;
+	}
+
+	/**
+	 * Copy available files for a crashed snapshot test
+	 */
+	private async copyCrashedSnapshotFiles(
+		sourceDir: string,
+		projectSlug: string,
+		buildId: string,
+		testName: string,
+		result: AggregatedSnapshotResult
+	): Promise<void> {
+		const destDir = path.join(
+			this.repository['storage']['basePath'],
+			this.repository['basePath'](projectSlug, buildId),
+			'snapshots',
+			testName
+		);
+
+		await fs.mkdir(destDir, { recursive: true });
+
+		// Copy any screenshot that might exist
+		const screenshotCandidates = [
+			`${testName}_screenshot.png`,
+			'screenshot.png',
+			`${testName}.png`,
+		];
+
+		for (const filename of screenshotCandidates) {
+			const sourcePath = path.join(sourceDir, filename);
+			try {
+				await fs.access(sourcePath);
+				await fs.copyFile(sourcePath, path.join(destDir, 'screenshot.png'));
+				result.screenshotPath = 'screenshot.png';
+				break;
+			} catch {
+				// Try next candidate
+			}
+		}
+
+		// Copy log file
+		const logCandidates = [`${testName}_log.txt`, 'log.txt', `${testName}.log`];
+
+		for (const filename of logCandidates) {
+			const sourcePath = path.join(sourceDir, filename);
+			try {
+				await fs.access(sourcePath);
+				await fs.copyFile(sourcePath, path.join(destDir, 'log.txt'));
+				break;
+			} catch {
+				// Try next candidate
+			}
+		}
+
+		// Save result.json
 		await fs.writeFile(
 			path.join(destDir, 'result.json'),
 			JSON.stringify(result, null, 2)

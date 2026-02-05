@@ -77,7 +77,9 @@ export function SnapshotComparisonModal({
 									? 'bg-green-900/50 text-green-300'
 									: details.statusText === 'failed'
 										? 'bg-red-900/50 text-red-300'
-										: 'bg-yellow-900/50 text-yellow-300'
+										: details.statusText === 'crashed'
+											? 'bg-purple-900/50 text-purple-300'
+											: 'bg-yellow-900/50 text-yellow-300'
 							}`}>
 								{details.statusText.replace('_', ' ')}
 							</span>
@@ -88,7 +90,7 @@ export function SnapshotComparisonModal({
 						{/* Set as Reference Button */}
 						<button
 							onClick={handleSetAsReference}
-							disabled={setReferenceMutation.isPending}
+							disabled={setReferenceMutation.isPending || details?.statusText === 'crashed'}
 							className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
 						>
 							{setReferenceMutation.isPending ? 'Setting...' : 'Set as Reference'}
@@ -123,6 +125,7 @@ export function SnapshotComparisonModal({
 								diffPercentage={comparison?.hasReference ? comparison.diffPercentage : undefined}
 								log={log}
 								logLoading={logLoading}
+								defaultMode={details?.statusText === 'crashed' ? 'log' : undefined}
 							/>
 						)}
 					</div>
@@ -144,6 +147,16 @@ export function SnapshotComparisonModal({
 											<dd className="text-gray-200">{details.executionTimeSeconds.toFixed(2)}s</dd>
 										</div>
 									</dl>
+								</div>
+							)}
+
+							{/* Crash Info */}
+							{details?.statusText === 'crashed' && (
+								<div className="p-3 bg-purple-900/30 border border-purple-700 rounded">
+									<h3 className="text-sm font-medium text-purple-300 mb-1">Test Crashed</h3>
+									<p className="text-xs text-gray-400">
+										This test crashed without producing results. Check the console output below for details.
+									</p>
 								</div>
 							)}
 
@@ -178,8 +191,8 @@ export function SnapshotComparisonModal({
 								</div>
 							)}
 
-							{/* Errors */}
-							{details?.errors && details.errors.length > 0 && (
+							{/* Errors (hidden for crashed tests - the log view has the details) */}
+							{details?.statusText !== 'crashed' && details?.errors && details.errors.length > 0 && (
 								<div>
 									<h3 className="text-sm font-medium text-red-400 mb-2">
 										Errors ({details.errors.length})

@@ -17,12 +17,14 @@ const statusColors: Record<SnapshotTestStatus, string> = {
 	passed: 'bg-green-900/50 text-green-300 border-green-800',
 	failed: 'bg-red-900/50 text-red-300 border-red-800',
 	passed_with_warnings: 'bg-yellow-900/50 text-yellow-300 border-yellow-800',
+	crashed: 'bg-purple-900/50 text-purple-300 border-purple-800',
 };
 
 const statusIcons: Record<SnapshotTestStatus, string> = {
 	passed: '✓',
 	failed: '✗',
 	passed_with_warnings: '⚠',
+	crashed: '💥',
 };
 
 export function SnapshotTestResults({ results, buildId, projectSlug, configurationId }: SnapshotTestResultsProps) {
@@ -35,7 +37,7 @@ export function SnapshotTestResults({ results, buildId, projectSlug, configurati
 		return results.filter(result => {
 			// Filter by status
 			if (filter === 'passed' && result.statusText !== 'passed') return false;
-			if (filter === 'failed' && result.statusText !== 'failed') return false;
+			if (filter === 'failed' && result.statusText !== 'failed' && result.statusText !== 'crashed') return false;
 
 			// Filter by search
 			if (searchQuery) {
@@ -146,15 +148,28 @@ function SnapshotCard({
 			className="border border-gray-700 rounded-lg overflow-hidden cursor-pointer hover:border-gray-600 transition-colors bg-gray-800"
 		>
 			{/* Thumbnail */}
-			<div className="aspect-video bg-gray-900 relative">
-				<img
-					src={screenshotUrl}
-					alt={result.testName}
-					className="w-full h-full object-cover"
-					onError={(e) => {
-						(e.target as HTMLImageElement).style.display = 'none';
-					}}
-				/>
+			<div className="aspect-video bg-gray-900 relative flex items-center justify-center">
+				{result.screenshotPath ? (
+					<img
+						src={screenshotUrl}
+						alt={result.testName}
+						className="w-full h-full object-cover"
+						onError={(e) => {
+							(e.target as HTMLImageElement).style.display = 'none';
+						}}
+					/>
+				) : (
+					<div className="text-center text-gray-500">
+						{result.statusText === 'crashed' ? (
+							<>
+								<span className="text-3xl">💥</span>
+								<div className="text-sm mt-2">Test Crashed</div>
+							</>
+						) : (
+							<span>No screenshot</span>
+						)}
+					</div>
+				)}
 			</div>
 
 			{/* Info */}

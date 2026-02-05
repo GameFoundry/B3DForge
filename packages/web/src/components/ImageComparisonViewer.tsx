@@ -9,6 +9,7 @@ interface ImageComparisonViewerProps {
 	diffPercentage?: number;
 	log?: string;
 	logLoading?: boolean;
+	defaultMode?: ViewMode;
 	onModeChange?: (mode: ViewMode) => void;
 }
 
@@ -19,9 +20,10 @@ export function ImageComparisonViewer({
 	diffPercentage,
 	log,
 	logLoading,
+	defaultMode,
 	onModeChange,
 }: ImageComparisonViewerProps) {
-	const [mode, setMode] = useState<ViewMode>('slider');
+	const [mode, setMode] = useState<ViewMode>(defaultMode ?? 'slider');
 	const [sliderPosition, setSliderPosition] = useState(50);
 	const [zoom, setZoom] = useState(1);
 	const [pan, setPan] = useState({ x: 0, y: 0 });
