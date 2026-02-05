@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 
-type ViewMode = 'slider' | 'side-by-side' | 'diff';
+type ViewMode = 'slider' | 'side-by-side' | 'diff' | 'log';
 
 interface ImageComparisonViewerProps {
 	currentUrl: string;
 	referenceUrl?: string;
 	diffUrl?: string;
 	diffPercentage?: number;
+	log?: string;
+	logLoading?: boolean;
 	onModeChange?: (mode: ViewMode) => void;
 }
 
@@ -15,6 +17,8 @@ export function ImageComparisonViewer({
 	referenceUrl,
 	diffUrl,
 	diffPercentage,
+	log,
+	logLoading,
 	onModeChange,
 }: ImageComparisonViewerProps) {
 	const [mode, setMode] = useState<ViewMode>('slider');
@@ -90,6 +94,7 @@ export function ImageComparisonViewer({
 			if (e.key === '1') handleModeChange('slider');
 			else if (e.key === '2') handleModeChange('side-by-side');
 			else if (e.key === '3' && hasDiff) handleModeChange('diff');
+			else if (e.key === '4') handleModeChange('log');
 			else if (e.key === '+' || e.key === '=') handleZoom(0.25);
 			else if (e.key === '-') handleZoom(-0.25);
 			else if (e.key === '0') handleReset();
@@ -138,6 +143,15 @@ export function ImageComparisonViewer({
 						)}
 					</div>
 
+					{/* Log Button - separate from image modes */}
+					<button
+						onClick={() => handleModeChange('log')}
+						className={`px-3 py-1.5 text-sm border border-gray-600 rounded-md ${mode === 'log' ? 'bg-blue-900/50 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
+						title="Console output (4)"
+					>
+						Log
+					</button>
+
 					{diffPercentage !== undefined && (
 						<span className={`px-2 py-1 text-sm rounded ${
 							diffPercentage === 0 ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'
@@ -185,7 +199,9 @@ export function ImageComparisonViewer({
 				onMouseUp={handleMouseUp}
 				onMouseLeave={handleMouseUp}
 			>
-				{mode === 'slider' && hasReference ? (
+				{mode === 'log' ? (
+					<LogView log={log} logLoading={logLoading} />
+				) : mode === 'slider' && hasReference ? (
 					<SliderView
 						currentUrl={currentUrl}
 						referenceUrl={referenceUrl!}
@@ -230,7 +246,7 @@ export function ImageComparisonViewer({
 
 			{/* Help text */}
 			<div className="p-2 bg-gray-800 text-xs text-gray-500 border-t border-gray-700">
-				Drag to pan · Scroll or +/- to zoom · Keys 1-3 to switch modes
+				Drag to pan · Scroll or +/- to zoom · Keys 1-4 to switch modes
 			</div>
 		</div>
 	);
@@ -383,6 +399,32 @@ function SingleImageView({
 			<div className="absolute bottom-4 left-4 px-2 py-1 bg-black/70 text-white text-xs rounded">
 				No reference image available
 			</div>
+		</div>
+	);
+}
+
+function LogView({
+	log,
+	logLoading,
+}: {
+	log?: string;
+	logLoading?: boolean;
+}) {
+	return (
+		<div className="w-full h-full overflow-auto p-4 bg-gray-900">
+			{logLoading ? (
+				<div className="flex items-center justify-center h-full text-gray-500">
+					Loading console output...
+				</div>
+			) : log ? (
+				<pre className="text-sm text-gray-300 font-mono whitespace-pre-wrap break-words">
+					{log}
+				</pre>
+			) : (
+				<div className="flex items-center justify-center h-full text-gray-500">
+					No console output available
+				</div>
+			)}
 		</div>
 	);
 }

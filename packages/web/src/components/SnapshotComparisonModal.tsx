@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useSnapshotComparison, useSnapshotDetails, useSnapshotLog, useSetReference } from '../hooks/useTestResults';
 import { testsApi, referencesApi } from '../api/client';
 import { ImageComparisonViewer } from './ImageComparisonViewer';
@@ -22,7 +22,6 @@ export function SnapshotComparisonModal({
 	const { data: details, isLoading: detailsLoading } = useSnapshotDetails(buildId, testName);
 	const { data: log, isLoading: logLoading } = useSnapshotLog(buildId, testName);
 	const setReferenceMutation = useSetReference();
-	const [showLog, setShowLog] = useState(false);
 
 	// Close on escape key
 	useEffect(() => {
@@ -122,6 +121,8 @@ export function SnapshotComparisonModal({
 								referenceUrl={referenceUrl}
 								diffUrl={diffUrl}
 								diffPercentage={comparison?.hasReference ? comparison.diffPercentage : undefined}
+								log={log}
+								logLoading={logLoading}
 							/>
 						)}
 					</div>
@@ -208,32 +209,6 @@ export function SnapshotComparisonModal({
 									</ul>
 								</div>
 							)}
-
-							{/* Console Output */}
-							<div>
-								<button
-									onClick={() => setShowLog(!showLog)}
-									className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2 hover:text-gray-200"
-								>
-									<span className={`transform transition-transform ${showLog ? 'rotate-90' : ''}`}>
-										▶
-									</span>
-									Console Output
-								</button>
-								{showLog && (
-									<div className="bg-gray-900 border border-gray-700 rounded p-2 max-h-48 overflow-y-auto">
-										{logLoading ? (
-											<div className="text-gray-500 text-sm">Loading...</div>
-										) : log ? (
-											<pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap break-words">
-												{log}
-											</pre>
-										) : (
-											<div className="text-gray-500 text-sm">No console output available</div>
-										)}
-									</div>
-								)}
-							</div>
 
 							{/* Actions */}
 							<div className="pt-4 border-t border-gray-700">
