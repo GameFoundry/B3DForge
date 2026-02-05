@@ -1,6 +1,46 @@
 import { Link, Outlet } from 'react-router-dom';
+import { useBuildNotifications } from '../hooks/useBuildNotifications';
+import { useNotificationPermission } from '../hooks/useNotificationPermission';
+
+function NotificationBell() {
+  const { permission, requestPermission } = useNotificationPermission();
+
+  if (permission === 'unsupported' || permission === 'granted')
+    return null;
+
+  const isDenied = permission === 'denied';
+  const title = isDenied
+    ? 'Notifications blocked - enable in browser settings'
+    : 'Enable desktop notifications';
+
+  return (
+    <button
+      onClick={isDenied ? undefined : requestPermission}
+      title={title}
+      className={`relative p-1.5 rounded transition-colors ${
+        isDenied
+          ? 'text-gray-600 cursor-not-allowed'
+          : 'text-gray-400 hover:text-gray-100 hover:bg-gray-700'
+      }`}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+        <path fillRule="evenodd" d="M10 2a6 6 0 00-6 6c0 1.887-.454 3.665-1.257 5.234a.75.75 0 00.515 1.076 32.91 32.91 0 003.256.508 3.5 3.5 0 006.972 0 32.903 32.903 0 003.256-.508.75.75 0 00.515-1.076A11.448 11.448 0 0116 8a6 6 0 00-6-6zM8.05 14.943a33.54 33.54 0 003.9 0 2 2 0 01-3.9 0z" clipRule="evenodd" />
+      </svg>
+      {!isDenied && (
+        <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-amber-500 rounded-full" />
+      )}
+      {isDenied && (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 absolute bottom-0.5 right-0 text-red-500">
+          <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 export function Layout() {
+  useBuildNotifications();
+
   return (
     <div className="min-h-screen bg-gray-900">
       <nav className="bg-gray-800 border-b border-gray-700">
@@ -34,6 +74,9 @@ export function Layout() {
                   Settings
                 </Link>
               </div>
+            </div>
+            <div className="flex items-center">
+              <NotificationBell />
             </div>
           </div>
         </div>

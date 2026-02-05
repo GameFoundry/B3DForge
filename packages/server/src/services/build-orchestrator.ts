@@ -300,6 +300,18 @@ export class BuildOrchestrator {
     await this.buildRepo.updateStatus(projectSlug, buildId, 'running');
     this.emitBuildStatus(buildId, 'running');
 
+    // Emit global notification for auto-triggered builds
+    if (build.triggerType === 'auto' || build.triggerType === 'webhook') {
+      this.io.emit('build:started', {
+        buildId,
+        projectSlug,
+        projectName: project.name,
+        buildNumber: build.buildNumber,
+        triggerType: build.triggerType,
+        configurationName: build.configurationName,
+      });
+    }
+
     // Create executor
     const executor = new BuildExecutor(this.executorConfig);
     this.activeExecutors.set(buildId, executor);
@@ -443,6 +455,21 @@ export class BuildOrchestrator {
 
         // Global update for dashboard
         this.io.emit('builds:updated');
+
+        // Global notification with build result details
+        this.io.emit('build:finished', {
+          buildId,
+          projectSlug,
+          projectName: project.name,
+          buildNumber: build.buildNumber,
+          triggerType: build.triggerType,
+          configurationName: build.configurationName,
+          status: finalStatus,
+          durationMs,
+          warningCount: executor.getWarningCount(),
+          errorCount: executor.getErrorCount(),
+          testSummary,
+        });
 
         // Cleanup
         this.activeExecutors.delete(buildId);
