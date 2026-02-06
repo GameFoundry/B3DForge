@@ -178,9 +178,22 @@ function SnapshotCard({
 					<h4 className="font-medium text-sm truncate text-gray-100" title={result.testName}>
 						{result.testName}
 					</h4>
-					<span className={`px-2 py-0.5 text-xs rounded-full border ${statusColors[result.statusText]}`}>
-						{statusIcons[result.statusText]} {result.statusText.replace('_', ' ')}
-					</span>
+					<div className="flex items-center gap-2 shrink-0">
+						{result.diffPercentage !== undefined && result.statusText !== 'crashed' && (
+							<span className={`px-1.5 py-0.5 text-xs rounded ${
+								result.diffPercentage === 0
+									? 'bg-green-900/50 text-green-300'
+									: result.diffPercentage < 2
+										? 'bg-yellow-900/50 text-yellow-300'
+										: 'bg-red-900/50 text-red-300'
+							}`}>
+								{result.diffPercentage.toFixed(2)}%
+							</span>
+						)}
+						<span className={`px-2 py-0.5 text-xs rounded-full border ${statusColors[result.statusText]}`}>
+							{statusIcons[result.statusText]} {result.statusText.replace('_', ' ')}
+						</span>
+					</div>
 				</div>
 
 				{(result.errors.length > 0 || result.warnings.length > 0) && (
@@ -192,12 +205,6 @@ function SnapshotCard({
 						{result.warnings.length > 0 && (
 							<span className="text-yellow-400">{result.warnings.length} warning(s)</span>
 						)}
-					</div>
-				)}
-
-				{result.diffPercentage !== undefined && result.diffPercentage > 0 && (
-					<div className="mt-1 text-xs text-red-400">
-						{result.diffPercentage.toFixed(2)}% difference
 					</div>
 				)}
 			</div>

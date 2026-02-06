@@ -48,6 +48,45 @@ export function createTestRoutes(
 				return;
 			}
 
+			// Enrich snapshot results with diff percentages
+			if (results.snapshotTests?.results) {
+				const build = await buildRepo.findById(projectSlug, buildId);
+				if (build) {
+					const configurationId = build.configurationId || 'default';
+					const manifest = await referenceRepository.getManifest(projectSlug, configurationId);
+
+					await Promise.all(results.snapshotTests.results.map(async (snapshot) => {
+						if (snapshot.statusText === 'crashed' || !snapshot.screenshotPath)
+							return;
+						if (!manifest.references[snapshot.testName])
+							return;
+
+						try {
+							const screenshotPath = path.join(
+								dataPath,
+								testResultsRepository.getScreenshotFilePath(projectSlug, buildId, snapshot.testName)
+							);
+							const referencePath = referenceRepository.getReferenceImagePath(
+								projectSlug, configurationId, snapshot.testName
+							);
+
+							const [screenshotStat, referenceStat] = await Promise.all([
+								fs.stat(screenshotPath).catch(() => null),
+								fs.stat(referencePath).catch(() => null),
+							]);
+							if (!screenshotStat || screenshotStat.size === 0 || !referenceStat || referenceStat.size === 0)
+								return;
+
+							snapshot.diffPercentage = await imageComparisonService.getDiffPercentage(
+								screenshotPath, referencePath
+							);
+						} catch {
+							// Comparison failed, leave diffPercentage undefined
+						}
+					}));
+				}
+			}
+
 			res.json(results);
 		} catch (error) {
 			next(error);
