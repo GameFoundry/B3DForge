@@ -6,8 +6,9 @@ import type {
   UpdateConfigurationInput,
 } from '@banshee-forge/shared';
 import { ProjectRepository } from '../repositories/project-repository.js';
+import { GitPollingService } from '../services/git-polling-service.js';
 
-export function createProjectRoutes(projectRepo: ProjectRepository): Router {
+export function createProjectRoutes(projectRepo: ProjectRepository, pollingService?: GitPollingService): Router {
   const router = Router();
 
   // GET /api/v1/projects - List all projects
@@ -54,6 +55,15 @@ export function createProjectRoutes(projectRepo: ProjectRepository): Router {
         res.status(404).json({ error: 'Not found', message: 'Project not found' });
         return;
       }
+
+      // Notify polling service if auto-build settings may have changed
+      if (pollingService && (
+        input.autoBuild !== undefined ||
+        input.pollInterval !== undefined ||
+        input.watchedRepositories !== undefined
+      ))
+        await pollingService.updateProject(req.params.slug);
+
       res.json(project);
     } catch (error) {
       next(error);
@@ -63,12 +73,61 @@ export function createProjectRoutes(projectRepo: ProjectRepository): Router {
   // DELETE /api/v1/projects/:slug - Delete project
   router.delete('/:slug', async (req, res, next) => {
     try {
+      if (pollingService)
+        pollingService.removeProject(req.params.slug);
+
       const deleted = await projectRepo.delete(req.params.slug);
       if (!deleted) {
         res.status(404).json({ error: 'Not found', message: 'Project not found' });
         return;
       }
       res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // ============================================
+  // Polling endpoints
+  // ============================================
+
+  // GET /api/v1/projects/:slug/polling-status - Get polling status
+  router.get('/:slug/polling-status', async (req, res, next) => {
+    try {
+      const project = await projectRepo.findBySlug(req.params.slug);
+      if (!project) {
+        res.status(404).json({ error: 'Not found', message: 'Project not found' });
+        return;
+      }
+
+      if (!pollingService) {
+        res.json({ enabled: false, pollInterval: project.pollInterval, repositories: [] });
+        return;
+      }
+
+      const status = await pollingService.getStatus(req.params.slug);
+      res.json(status);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /api/v1/projects/:slug/poll-now - Force immediate poll
+  router.post('/:slug/poll-now', async (req, res, next) => {
+    try {
+      const project = await projectRepo.findBySlug(req.params.slug);
+      if (!project) {
+        res.status(404).json({ error: 'Not found', message: 'Project not found' });
+        return;
+      }
+
+      if (!pollingService) {
+        res.status(400).json({ error: 'Bad request', message: 'Polling service not available' });
+        return;
+      }
+
+      const status = await pollingService.pollNow(req.params.slug);
+      res.json(status);
     } catch (error) {
       next(error);
     }

@@ -1,7 +1,7 @@
 import type {
   Project, CreateProjectInput, UpdateProjectInput,
   Build, BuildSummary, CreateBuildInput, PaginatedResponse,
-  LogLine, QueueStatus, ScriptSource,
+  LogLine, QueueStatus, ScriptSource, PollingStatus,
   BuildConfiguration, CreateConfigurationInput, UpdateConfigurationInput,
   ConfigResponse, ConfigUpdateResponse, ConfigValidationResponse, ServerConfigUpdate,
   BuildTestResults, UnitTestOutput, TestSuite, AggregatedSnapshotResult,
@@ -78,6 +78,12 @@ export const projectsApi = {
     fetchJson<{ success: boolean }>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/test`, {
       method: 'DELETE'
     }),
+
+  // Polling endpoints
+  getPollingStatus: (slug: string) =>
+    fetchJson<PollingStatus>(`${API_BASE}/projects/${slug}/polling-status`),
+  pollNow: (slug: string) =>
+    fetchJson<PollingStatus>(`${API_BASE}/projects/${slug}/poll-now`, { method: 'POST' }),
 
   // Fetch script endpoints (always local bash)
   getConfigurationFetchScript: (slug: string, configId: string) =>

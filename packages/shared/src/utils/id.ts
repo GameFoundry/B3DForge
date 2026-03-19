@@ -14,3 +14,6 @@ export const generateBuildId = () => generateId('build');
 
 /** Generate configuration ID */
 export const generateConfigurationId = () => generateId('cfg');
+
+/** Generate watched repository ID */
+export const generateWatchedRepoId = () => generateId('repo');

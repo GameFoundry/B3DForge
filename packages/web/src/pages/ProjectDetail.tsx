@@ -7,6 +7,7 @@ import { useBuildsUpdates } from '../hooks/useBuildsUpdates';
 import { BuildStatusBadge } from '../components/BuildStatusBadge';
 import { TriggerBuildModal } from '../components/TriggerBuildModal';
 import { ConfigurationList } from '../components/ConfigurationList';
+import { AutoBuildSettings } from '../components/AutoBuildSettings';
 
 export function ProjectDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -14,7 +15,7 @@ export function ProjectDetail() {
   const { data: buildsData, isLoading: buildsLoading } = useBuilds(slug!);
   const triggerBuild = useTriggerBuild();
   const [showTriggerModal, setShowTriggerModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'builds' | 'configurations'>('builds');
+  const [activeTab, setActiveTab] = useState<'builds' | 'configurations' | 'automation'>('builds');
 
   // Listen for build status updates to refresh the list
   useBuildsUpdates(slug);
@@ -144,6 +145,16 @@ export function ProjectDetail() {
           >
             Configurations
           </button>
+          <button
+            onClick={() => setActiveTab('automation')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'automation'
+                ? 'border-blue-500 text-blue-400'
+                : 'border-transparent text-gray-400 hover:text-gray-300'
+            }`}
+          >
+            Automation
+          </button>
         </nav>
       </div>
 
@@ -262,6 +273,11 @@ export function ProjectDetail() {
       {/* Configurations Tab */}
       {activeTab === 'configurations' && (
         <ConfigurationList project={project} />
+      )}
+
+      {/* Automation Tab */}
+      {activeTab === 'automation' && (
+        <AutoBuildSettings project={project} />
       )}
 
       {/* Trigger Build Modal */}

@@ -14,6 +14,7 @@ import { createConfigRoutes } from './routes/config.js';
 import { createTestRoutes } from './routes/tests.js';
 import { createReferenceRoutes } from './routes/references.js';
 import { BuildOrchestrator } from './services/build-orchestrator.js';
+import { GitPollingService } from './services/git-polling-service.js';
 import { ConfigService } from './services/config-service.js';
 import { TestResultsService } from './services/test-results-service.js';
 import { ImageComparisonService } from './services/image-comparison-service.js';
@@ -65,8 +66,11 @@ const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, testResul
   defaultTimeoutMs: 60 * 60 * 1000,
 });
 
+// Initialize git polling service
+const pollingService = new GitPollingService(projectRepo, buildRepo, orchestrator, io);
+
 // API routes - pass orchestrator to build routes
-app.use('/api/v1/projects', createProjectRoutes(projectRepo));
+app.use('/api/v1/projects', createProjectRoutes(projectRepo, pollingService));
 app.use('/api/v1', createBuildRoutes(buildRepo, projectRepo, orchestrator));
 app.use('/api/v1/config', createConfigRoutes(configService));
 app.use('/api/v1', createTestRoutes(
@@ -136,12 +140,15 @@ io.on('connection', (socket) => {
 });
 
 // Export for potential programmatic use
-export { io, projectRepo, buildRepo, orchestrator, testResultsService, testResultsRepo, referenceRepo, imageComparisonService };
+export { io, projectRepo, buildRepo, orchestrator, pollingService, testResultsService, testResultsRepo, referenceRepo, imageComparisonService };
 
 // Start server
 async function start() {
   // Initialize orchestrator (recover pending builds)
   await orchestrator.initialize();
+
+  // Start git polling for auto-builds
+  await pollingService.initialize();
 
   httpServer.listen(PORT, () => {
     console.log(`BansheeForge server listening on port ${PORT}`);

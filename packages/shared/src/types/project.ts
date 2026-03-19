@@ -1,3 +1,32 @@
+/** Watched repository for git polling */
+export interface WatchedRepository {
+  id: string;
+  name: string;         // e.g., "Framework", "Editor", "Examples"
+  gitUrl: string;
+  gitBranch: string;
+  lastCommit?: string;  // Last seen commit SHA from polling
+}
+
+/** Repository polling status (per-repo detail in API response) */
+export interface PollingRepositoryStatus {
+  id: string;
+  name: string;
+  gitUrl: string;
+  gitBranch: string;
+  lastCommit?: string;
+  lastCheckedAt?: string;
+  error?: string;
+}
+
+/** Polling status for a project */
+export interface PollingStatus {
+  enabled: boolean;
+  pollInterval: number;
+  lastPollAt?: string;
+  nextPollAt?: string;
+  repositories: PollingRepositoryStatus[];
+}
+
 /** Configuration schema field types */
 export interface ConfigSchemaField {
   type: 'select' | 'boolean' | 'string' | 'number';
@@ -72,6 +101,7 @@ export interface Project {
   // Automation settings
   autoBuild: boolean;                // Master switch for auto-builds
   pollInterval: number;              // seconds
+  watchedRepositories?: WatchedRepository[];  // Repos to poll for changes
 
   // Git state
   lastCommit?: string;

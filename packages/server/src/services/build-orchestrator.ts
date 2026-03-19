@@ -12,6 +12,7 @@ import { ProjectRepository } from '../repositories/project-repository.js';
 export class BuildOrchestrator {
   private queue: BuildQueue;
   private activeExecutors: Map<string, BuildExecutor> = new Map();
+  private activeBuildProjects: Map<string, string> = new Map(); // buildId -> projectSlug
   private cleanup: WorkspaceCleanup;
   private executorConfig: ExecutorConfig;
   private dataPath: string;
@@ -73,6 +74,22 @@ export class BuildOrchestrator {
 
   getQueueStatus(): QueueStatus {
     return this.queue.getStatus();
+  }
+
+  /** Check if a project has any pending or running builds */
+  hasActiveBuilds(projectSlug: string): boolean {
+    const status = this.queue.getStatus();
+
+    // Check queue for pending builds for this project
+    if (status.queue.some(job => job.projectSlug === projectSlug))
+      return true;
+
+    // Check currently running builds for this project
+    for (const [, slug] of this.activeBuildProjects) {
+      if (slug === projectSlug) return true;
+    }
+
+    return false;
   }
 
   private setupQueueListeners(): void {
@@ -315,6 +332,7 @@ export class BuildOrchestrator {
     // Create executor
     const executor = new BuildExecutor(this.executorConfig);
     this.activeExecutors.set(buildId, executor);
+    this.activeBuildProjects.set(buildId, projectSlug);
 
     // Track pending phase updates for completion barrier
     const pendingPhaseUpdates: Promise<void>[] = [];
@@ -473,6 +491,7 @@ export class BuildOrchestrator {
 
         // Cleanup
         this.activeExecutors.delete(buildId);
+        this.activeBuildProjects.delete(buildId);
         this.queue.markComplete(buildId);
 
         // Trigger workspace cleanup for this project
@@ -492,6 +511,7 @@ export class BuildOrchestrator {
         }
         // Still try to clean up
         this.activeExecutors.delete(buildId);
+        this.activeBuildProjects.delete(buildId);
         this.queue.markComplete(buildId);
       }
     });
@@ -511,11 +531,13 @@ export class BuildOrchestrator {
 
         this.emitBuildStatus(buildId, 'failed');
         this.activeExecutors.delete(buildId);
+        this.activeBuildProjects.delete(buildId);
         this.queue.markComplete(buildId);
       } catch (err) {
         console.error(`Error in error handler for build ${buildId}:`, err);
         // Still try to clean up
         this.activeExecutors.delete(buildId);
+        this.activeBuildProjects.delete(buildId);
         this.queue.markComplete(buildId);
       }
     });
@@ -528,6 +550,7 @@ export class BuildOrchestrator {
       await this.buildRepo.updateStatus(projectSlug, buildId, 'failed');
       this.emitBuildStatus(buildId, 'failed');
       this.activeExecutors.delete(buildId);
+        this.activeBuildProjects.delete(buildId);
       this.queue.markComplete(buildId);
     }
   }

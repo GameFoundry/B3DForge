@@ -202,3 +202,27 @@ export function useUpdateConfigurationFetchScript() {
   });
 }
 
+// ============================================
+// Polling hooks
+// ============================================
+
+export function usePollingStatus(slug: string) {
+  return useQuery({
+    queryKey: ['projects', slug, 'polling-status'],
+    queryFn: () => projectsApi.getPollingStatus(slug),
+    enabled: !!slug,
+    refetchInterval: 30000, // Refresh every 30s
+  });
+}
+
+export function usePollNow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => projectsApi.pollNow(slug),
+    onSuccess: (_, slug) => {
+      queryClient.invalidateQueries({ queryKey: ['projects', slug, 'polling-status'] });
+      queryClient.invalidateQueries({ queryKey: ['projects', slug] });
+    },
+  });
+}
+
