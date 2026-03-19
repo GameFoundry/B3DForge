@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { LogLine, BuildPhase, BuildStatus } from '@banshee-forge/shared';
@@ -11,7 +11,7 @@ import { PhaseTimeline } from '../components/PhaseTimeline';
 import { UnitTestResults } from '../components/UnitTestResults';
 import { SnapshotTestResults } from '../components/SnapshotTestResults';
 
-type MainTab = 'logs' | 'unit' | 'snapshots';
+type MainTab = 'info' | 'logs' | 'unit' | 'snapshots';
 
 export function BuildDetail() {
   const { id } = useParams<{ id: string }>();
@@ -312,44 +312,6 @@ export function BuildDetail() {
             isRunning={displayStatus === 'running'}
           />
 
-          {/* Build Info */}
-          <div className="bg-gray-800 rounded-lg p-4 mt-4">
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Build Info</h3>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Started</dt>
-                <dd className="text-gray-300">
-                  {build.startedAt ? new Date(build.startedAt).toLocaleString() : '-'}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Finished</dt>
-                <dd className="text-gray-300">
-                  {build.finishedAt ? new Date(build.finishedAt).toLocaleString() : '-'}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Workspace</dt>
-                <dd className={`${build.cleanBuild ? 'text-orange-300' : 'text-cyan-300'}`}>
-                  {build.cleanBuild ? 'Clean (fresh)' : 'Incremental (reused)'}
-                </dd>
-              </div>
-              {build.config && Object.keys(build.config).length > 0 && (
-                <>
-                  <div className="border-t border-gray-700 pt-2 mt-2">
-                    <dt className="text-gray-500 mb-1">Configuration</dt>
-                    <dd className="text-gray-300 font-mono text-xs">
-                      {Object.entries(build.config).map(([key, value]) => (
-                        <div key={key}>
-                          {key}: {String(value)}
-                        </div>
-                      ))}
-                    </dd>
-                  </div>
-                </>
-              )}
-            </dl>
-          </div>
         </div>
 
         {/* Log/Tests Content - takes remaining space */}
@@ -366,6 +328,16 @@ export function BuildDetail() {
                 }`}
               >
                 Build Log
+              </button>
+              <button
+                onClick={() => setActiveTab('info')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'info'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
+                }`}
+              >
+                Build Info
               </button>
               <button
                 onClick={() => setActiveTab('unit')}
@@ -410,6 +382,63 @@ export function BuildDetail() {
 
           {/* Tab Content */}
           <div className="flex-1 overflow-hidden">
+            {activeTab === 'info' && build && (
+              <div className="h-full overflow-y-auto bg-gray-900 rounded-lg p-6 space-y-6">
+                {/* Build Details */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-300 mb-3">Details</h3>
+                  <dl className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm max-w-lg">
+                    <dt className="text-gray-500">Started</dt>
+                    <dd className="text-gray-300">
+                      {build.startedAt ? new Date(build.startedAt).toLocaleString() : '-'}
+                    </dd>
+                    <dt className="text-gray-500">Finished</dt>
+                    <dd className="text-gray-300">
+                      {build.finishedAt ? new Date(build.finishedAt).toLocaleString() : '-'}
+                    </dd>
+                    <dt className="text-gray-500">Workspace</dt>
+                    <dd className={build.cleanBuild ? 'text-orange-300' : 'text-cyan-300'}>
+                      {build.cleanBuild ? 'Clean (fresh)' : 'Incremental (reused)'}
+                    </dd>
+                    {build.config && Object.keys(build.config).length > 0 && (
+                      <>
+                        {Object.entries(build.config).map(([key, value]) => (
+                          <Fragment key={key}>
+                            <dt className="text-gray-500">{key}</dt>
+                            <dd className="text-gray-300 font-mono text-xs">{String(value)}</dd>
+                          </Fragment>
+                        ))}
+                      </>
+                    )}
+                  </dl>
+                </div>
+
+                {/* Repository Commits */}
+                {build.repositoryCommits && build.repositoryCommits.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Repository Commits</h3>
+                    <div className="space-y-2">
+                      {build.repositoryCommits.map((repo) => (
+                        <div
+                          key={repo.name}
+                          className="flex items-baseline gap-3 text-sm"
+                          style={{ paddingLeft: `${(repo.depth ?? 0) * 1.25}rem` }}
+                        >
+                          <span className="font-medium text-gray-300 flex-shrink-0">{repo.name}</span>
+                          <span className="font-mono text-xs text-blue-400 flex-shrink-0">{repo.commit.slice(0, 7)}</span>
+                          {repo.commitMessage && (
+                            <span className="text-gray-500 text-xs truncate" title={repo.commitMessage}>
+                              {repo.commitMessage}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'logs' && (
               isLogLoading && !isLive ? (
                 <div className="flex items-center justify-center h-full bg-gray-900 rounded-lg">

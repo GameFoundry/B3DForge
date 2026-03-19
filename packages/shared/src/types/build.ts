@@ -49,11 +49,20 @@ export interface BuildSummary {
   testSummary?: TestSummary;
 }
 
+/** Commit info for a repository (main repo or submodule) */
+export interface RepositoryCommitInfo {
+  name: string;
+  commit: string;
+  commitMessage: string;
+  depth: number;  // 0 = main repo, 1 = direct submodule, 2+ = nested
+}
+
 /** Full build details */
 export interface Build extends BuildSummary {
   projectSlug: string;
   phases: BuildPhase[];
   submoduleCommits?: Record<string, string>;
+  repositoryCommits?: RepositoryCommitInfo[];
 }
 
 /** Build creation input */

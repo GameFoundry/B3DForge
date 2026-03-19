@@ -451,6 +451,7 @@ export class BuildOrchestrator {
           phases: executor.getPhases(),
           warningCount: executor.getWarningCount(),
           errorCount: executor.getErrorCount(),
+          repositoryCommits: executor.getRepositoryCommits(),
           finishedAt,
           durationMs,
           testSummary,

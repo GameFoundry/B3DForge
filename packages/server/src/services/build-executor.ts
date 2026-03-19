@@ -2,7 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { promises as fs } from 'fs';
-import type { Build, Project, BuildPhase, PhaseStatus, LogLine, BuildErrorCode, ScriptConfig, BuildConfiguration } from '@banshee-forge/shared';
+import type { Build, Project, BuildPhase, PhaseStatus, LogLine, BuildErrorCode, ScriptConfig, BuildConfiguration, RepositoryCommitInfo } from '@banshee-forge/shared';
 import { parseLine } from './log-parser.js';
 
 export interface ExecutorEvents {
@@ -43,6 +43,7 @@ export class BuildExecutor extends EventEmitter {
   private lineNumber = 0;
   private killed = false;
   private timeoutId: NodeJS.Timeout | null = null;
+  private repositoryCommits: RepositoryCommitInfo[] = [];
 
   // Log buffering
   private logBuffer: LogLine[] = [];
@@ -176,6 +177,9 @@ export class BuildExecutor extends EventEmitter {
     }
 
     this.finishCurrentPhase('success', 0);
+
+    // Capture commit info from workspace after successful fetch
+    await this.captureRepositoryCommits(workspace, project);
 
     // Run build script - phases are defined by script output (e.g., [configure], [build])
     const buildResult = await this.runBashScript(bashPath, buildScriptPath, workspace, env);
@@ -364,6 +368,10 @@ export class BuildExecutor extends EventEmitter {
     return this.errorCount;
   }
 
+  getRepositoryCommits(): RepositoryCommitInfo[] {
+    return [...this.repositoryCommits];
+  }
+
   private async findBashPath(): Promise<string | null> {
     // Check configured path
     if (this.config.gitBashPath) {
@@ -494,6 +502,80 @@ export class BuildExecutor extends EventEmitter {
     }
 
     return null;
+  }
+
+  /**
+   * Capture commit hash and message for the main repo and all submodules
+   * (recursively) directly from the workspace after fetch.
+   */
+  private async captureRepositoryCommits(workspace: string, project: Project): Promise<void> {
+    try {
+      // Main repo
+      const mainCommit = await this.execGit(workspace, ['rev-parse', 'HEAD']);
+      const mainMessage = await this.execGit(workspace, ['log', '-1', '--format=%s']);
+
+      if (mainCommit) {
+        this.repositoryCommits.push({
+          name: project.name ?? 'Main',
+          commit: mainCommit.trim(),
+          commitMessage: mainMessage?.trim() ?? '',
+          depth: 0,
+        });
+      }
+
+      // Recursively walk submodules
+      await this.captureSubmoduleCommits(workspace, 1);
+    } catch (err) {
+      console.warn('Failed to capture repository commits:', err);
+    }
+  }
+
+  private async captureSubmoduleCommits(repoDir: string, depth: number): Promise<void> {
+    const output = await this.execGit(repoDir, [
+      'submodule', 'foreach', '--quiet',
+      'echo "$name||$toplevel/$sm_path"',
+    ]);
+
+    if (!output) return;
+
+    for (const line of output.trim().split('\n').filter(Boolean)) {
+      const [name, subPath] = line.split('||');
+      if (!name || !subPath) continue;
+
+      const trimmedPath = subPath.trim();
+      const subCommit = await this.execGit(trimmedPath, ['rev-parse', 'HEAD']);
+      const subMessage = await this.execGit(trimmedPath, ['log', '-1', '--format=%s']);
+
+      if (subCommit) {
+        this.repositoryCommits.push({
+          name: name.trim(),
+          commit: subCommit.trim(),
+          commitMessage: subMessage?.trim() ?? '',
+          depth,
+        });
+
+        // Recurse into this submodule's submodules
+        await this.captureSubmoduleCommits(trimmedPath, depth + 1);
+      }
+    }
+  }
+
+  private execGit(cwd: string, args: string[]): Promise<string | null> {
+    return new Promise((resolve) => {
+      const proc = spawn('git', args, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        shell: false,
+      });
+
+      let stdout = '';
+      proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString(); });
+      proc.on('close', (code) => {
+        resolve(code === 0 ? stdout : null);
+      });
+      proc.on('error', () => resolve(null));
+    });
   }
 
   private processOutput(data: string): void {
