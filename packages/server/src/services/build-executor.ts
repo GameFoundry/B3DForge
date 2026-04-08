@@ -104,17 +104,7 @@ export class BuildExecutor extends EventEmitter {
       return;
     }
 
-    // Resolve build script path (required, always bash)
-    const buildScriptPath = await this.resolveBuildScript(project, configuration, workspace);
-    if (!buildScriptPath) {
-      this.emit('error', 'SCRIPT_NOT_FOUND', `Build script not found for project ${project.slug}`);
-      return;
-    }
-
-    // Resolve test script path (optional, always bash)
-    const testScriptPath = await this.resolveTestScript(project, configuration, workspace);
-
-    // Build environment variables
+    // Build environment variables (test script resolved after fetch)
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       // System variables
@@ -131,8 +121,6 @@ export class BuildExecutor extends EventEmitter {
       WORKSPACE: this.toUnixPath(workspace),
       ARTIFACTS_DIR: this.toUnixPath(artifactsDir),
       RESULTS_DIR: this.toUnixPath(resultsDir),
-      // Pass test script info to build script
-      TEST_SCRIPT: testScriptPath ? this.toUnixPath(testScriptPath) : '',
       // User-configured variables from build config
       ...Object.fromEntries(
         Object.entries(build.config).map(([k, v]) => [k.toUpperCase(), String(v)])
@@ -180,6 +168,17 @@ export class BuildExecutor extends EventEmitter {
 
     // Capture commit info from workspace after successful fetch
     await this.captureRepositoryCommits(workspace, project);
+
+    // Resolve build/test scripts after fetch so repo-sourced scripts are available
+    const buildScriptPath = await this.resolveBuildScript(project, configuration, workspace);
+    if (!buildScriptPath) {
+      this.emit('error', 'SCRIPT_NOT_FOUND', `Build script not found for project ${project.slug}`);
+      this.cleanup();
+      return;
+    }
+
+    const testScriptPath = await this.resolveTestScript(project, configuration, workspace);
+    env.TEST_SCRIPT = testScriptPath ? this.toUnixPath(testScriptPath) : '';
 
     // Run build script - phases are defined by script output (e.g., [configure], [build])
     const buildResult = await this.runBashScript(bashPath, buildScriptPath, workspace, env);
