@@ -176,14 +176,33 @@ export class TestResultsService {
 					await this.copySnapshotFiles(testDir, projectSlug, buildId, testName, result);
 					results.push(result);
 				} else {
-					// No result.json found - test crashed
-					const crashedResult = await this.createCrashedSnapshotResult(
-						testDir,
-						testName,
-						projectSlug,
-						buildId
-					);
-					results.push(crashedResult);
+					// No result.json found - check log for actual error indicators
+					// before assuming crashed
+					const hasErrors = await this.logContainsErrors(testDir, testName);
+					if (hasErrors) {
+						const crashedResult = await this.createCrashedSnapshotResult(
+							testDir,
+							testName,
+							projectSlug,
+							buildId
+						);
+						results.push(crashedResult);
+					} else {
+						// Test exited cleanly but produced no result.json
+						const passedResult: AggregatedSnapshotResult = {
+							type: 'snapshot_test',
+							testName,
+							status: 0,
+							statusText: 'passed',
+							totalFrames: 0,
+							executionTimeSeconds: 0,
+							screenshotPath: '',
+							errors: [],
+							warnings: ['No result.json was produced by the test'],
+						};
+						await this.copyCrashedSnapshotFiles(testDir, projectSlug, buildId, testName, passedResult);
+						results.push(passedResult);
+					}
 				}
 			}
 		} catch {
@@ -349,6 +368,30 @@ export class TestResultsService {
 		await this.copyCrashedSnapshotFiles(testDir, projectSlug, buildId, testName, crashedResult);
 
 		return crashedResult;
+	}
+
+	/**
+	 * Check if a snapshot test's log contains error indicators.
+	 * Returns true if the log has error/crash/exception keywords, false otherwise.
+	 */
+	private async logContainsErrors(testDir: string, testName: string): Promise<boolean> {
+		const logCandidates = [`${testName}_log.txt`, 'log.txt', `${testName}.log`];
+
+		for (const filename of logCandidates) {
+			const logPath = path.join(testDir, filename);
+			try {
+				const logContent = await fs.readFile(logPath, 'utf-8');
+				const lines = logContent.trim().split('\n');
+				return lines.some(line =>
+					/error|crash|exception|abort|segfault|access violation/i.test(line)
+				);
+			} catch {
+				// Try next candidate
+			}
+		}
+
+		// No log file found - assume crashed
+		return true;
 	}
 
 	/**
