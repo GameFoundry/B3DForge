@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { Layout } from './components/Layout';
+import { RequireAuth } from './components/RequireAuth';
 import { Dashboard } from './pages/Dashboard';
 import { CreateProject } from './pages/CreateProject';
 import { ProjectDetail } from './pages/ProjectDetail';
@@ -25,15 +26,17 @@ export default function App() {
             },
           }}
         />
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="projects/new" element={<CreateProject />} />
-            <Route path="projects/:slug" element={<ProjectDetail />} />
-            <Route path="builds/:id" element={<BuildDetail />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-        </Routes>
+        <RequireAuth>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="projects/new" element={<CreateProject />} />
+              <Route path="projects/:slug" element={<ProjectDetail />} />
+              <Route path="builds/:id" element={<BuildDetail />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+          </Routes>
+        </RequireAuth>
       </BrowserRouter>
     </QueryClientProvider>
   );

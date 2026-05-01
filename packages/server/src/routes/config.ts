@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import type { ConfigResponse, ConfigUpdateResponse, ServerConfigUpdate } from '@banshee-forge/shared';
 import { ConfigService } from '../services/config-service.js';
+import { AuditLog } from '../auth/audit-log.js';
 
-export function createConfigRoutes(configService: ConfigService): Router {
+export function createConfigRoutes(configService: ConfigService, auditLog?: AuditLog): Router {
   const router = Router();
 
   // GET /api/v1/config - Get current configuration
@@ -12,6 +13,8 @@ export function createConfigRoutes(configService: ConfigService): Router {
       const response: ConfigResponse = {
         dataPath: config.dataPath,
         port: config.port,
+        bindHost: config.bindHost,
+        cookieSecure: config.cookieSecure,
         configSource: configService.getSource(),
         pendingRestart: configService.hasPendingChanges(),
       };
@@ -40,6 +43,8 @@ export function createConfigRoutes(configService: ConfigService): Router {
       }
 
       await configService.save(updates);
+
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'config.update', details: updates as Record<string, unknown> });
 
       const response: ConfigUpdateResponse = {
         success: true,

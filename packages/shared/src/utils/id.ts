@@ -17,3 +17,12 @@ export const generateConfigurationId = () => generateId('cfg');
 
 /** Generate watched repository ID */
 export const generateWatchedRepoId = () => generateId('repo');
+
+/** Generate user ID */
+export const generateUserId = () => generateId('user');
+
+/** Generate session ID (256-bit random, no prefix) */
+export const generateSessionId = () => randomBytes(32).toString('base64url');
+
+/** Generate agent token record ID */
+export const generateAgentTokenId = () => generateId('agt');

@@ -5,13 +5,15 @@ import { ReferenceRepository } from '../repositories/reference-repository.js';
 import { TestResultsRepository } from '../repositories/test-results-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { BuildRepository } from '../repositories/build-repository.js';
+import { AuditLog } from '../auth/audit-log.js';
 
 export function createReferenceRoutes(
 	referenceRepository: ReferenceRepository,
 	testResultsRepository: TestResultsRepository,
 	projectRepo: ProjectRepository,
 	buildRepo: BuildRepository,
-	dataPath: string
+	dataPath: string,
+	auditLog?: AuditLog
 ): Router {
 	const router = Router();
 
@@ -126,6 +128,7 @@ export function createReferenceRoutes(
 
 			// Set as reference
 			const info = await referenceRepository.setReference(slug, configId, testName, screenshotPath, buildId);
+			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.set', target: `${slug}/${configId}/${testName}`, details: { buildId } });
 			res.json(info);
 		} catch (error) {
 			next(error);
@@ -143,6 +146,7 @@ export function createReferenceRoutes(
 				return;
 			}
 
+			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.delete', target: `${slug}/${configId}/${testName}` });
 			res.json({ success: true });
 		} catch (error) {
 			next(error);
@@ -167,6 +171,7 @@ export function createReferenceRoutes(
 			}
 
 			const count = await referenceRepository.copyReferences(slug, sourceConfigId, configId);
+			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.copy', target: `${slug}/${configId}`, details: { sourceConfigId, copiedCount: count } });
 			res.json({ success: true, copiedCount: count });
 		} catch (error) {
 			next(error);

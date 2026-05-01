@@ -6,6 +6,7 @@ import type {
   ConfigResponse, ConfigUpdateResponse, ConfigValidationResponse, ServerConfigUpdate,
   BuildTestResults, UnitTestOutput, TestSuite, AggregatedSnapshotResult,
   ComparisonResult, ReferenceInfo, ReferenceManifest,
+  AuthMeResponse, LoginRequest,
 } from '@banshee-forge/shared';
 
 export interface ScriptResponse {
@@ -15,14 +16,30 @@ export interface ScriptResponse {
 
 const API_BASE = '/api/v1';
 
+/** Fired when any API call returns 401. AuthContext listens for this and resets. */
+export const AUTH_REQUIRED_EVENT = 'bsf:auth-required';
+
+export class UnauthorizedError extends Error {
+  constructor(message = 'Unauthorized') {
+    super(message);
+    this.name = 'UnauthorizedError';
+  }
+}
+
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
+    credentials: 'include',
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,
     },
   });
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
+    throw new UnauthorizedError();
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Unknown error' }));
@@ -31,6 +48,17 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
   return response.json();
 }
+
+// Auth API
+export const authApi = {
+  me: () => fetchJson<AuthMeResponse>(`${API_BASE}/auth/me`),
+  login: (input: LoginRequest) =>
+    fetchJson<AuthMeResponse>(`${API_BASE}/auth/login`, {
+      method: 'POST', body: JSON.stringify(input),
+    }),
+  logout: () =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/auth/logout`, { method: 'POST' }),
+};
 
 // Projects API
 export const projectsApi = {

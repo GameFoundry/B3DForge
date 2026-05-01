@@ -1,6 +1,7 @@
 import { Link, Outlet } from 'react-router-dom';
 import { useBuildNotifications } from '../hooks/useBuildNotifications';
 import { useNotificationPermission } from '../hooks/useNotificationPermission';
+import { useAuth } from '../contexts/AuthContext';
 
 function NotificationBell() {
   const { permission, requestPermission } = useNotificationPermission();
@@ -40,6 +41,7 @@ function NotificationBell() {
 
 export function Layout() {
   useBuildNotifications();
+  const { username, logout } = useAuth();
 
   return (
     <div className="min-h-screen bg-gray-900">
@@ -75,8 +77,20 @@ export function Layout() {
                 </Link>
               </div>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center gap-3">
               <NotificationBell />
+              {username && (
+                <>
+                  <span className="text-sm text-gray-400 hidden sm:inline">{username}</span>
+                  <button
+                    onClick={() => { logout().catch(() => undefined); }}
+                    title="Sign out"
+                    className="px-2.5 py-1 text-sm text-gray-400 hover:text-gray-100 hover:bg-gray-700 rounded transition-colors"
+                  >
+                    Sign out
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -39,10 +39,11 @@ export function useBuildSocket({
   useEffect(() => {
     if (!enabled) return;
 
-    // Connect to server
+    // Connect to server (credentials so the session cookie travels on the handshake)
     const socket = io('/', {
       path: '/socket.io',
       transports: ['websocket', 'polling'],
+      withCredentials: true,
     });
     socketRef.current = socket;
 

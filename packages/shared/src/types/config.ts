@@ -4,6 +4,17 @@
 export interface ServerConfig {
   dataPath: string;
   port: number;
+  /**
+   * Network interface the HTTP server binds to. Defaults to `127.0.0.1` so the
+   * server is only reachable through a reverse proxy. Set to `0.0.0.0` to expose
+   * directly on the local network.
+   */
+  bindHost: string;
+  /**
+   * If true, set Secure on the session cookie. Required when serving over HTTPS
+   * (i.e. when behind a TLS-terminating reverse proxy).
+   */
+  cookieSecure: boolean;
 }
 
 /**
@@ -12,6 +23,8 @@ export interface ServerConfig {
 export interface ServerConfigUpdate {
   dataPath?: string;
   port?: number;
+  bindHost?: string;
+  cookieSecure?: boolean;
 }
 
 /**
@@ -25,6 +38,8 @@ export type ConfigSource = 'env' | 'file' | 'default';
 export interface ConfigResponse {
   dataPath: string;
   port: number;
+  bindHost: string;
+  cookieSecure: boolean;
   configSource: ConfigSource;
   pendingRestart: boolean;
 }

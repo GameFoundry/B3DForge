@@ -3,11 +3,13 @@ import type { CreateBuildInput, PaginatedResponse, BuildSummary } from '@banshee
 import { BuildRepository } from '../repositories/build-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { BuildOrchestrator } from '../services/build-orchestrator.js';
+import { AuditLog } from '../auth/audit-log.js';
 
 export function createBuildRoutes(
   buildRepo: BuildRepository,
   projectRepo: ProjectRepository,
-  orchestrator: BuildOrchestrator
+  orchestrator: BuildOrchestrator,
+  auditLog?: AuditLog
 ): Router {
   const router = Router();
 
@@ -75,6 +77,7 @@ export function createBuildRoutes(
       const priority = (input as any).priority ?? 0;
       await orchestrator.triggerBuild(req.params.slug, build.id, priority);
 
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'build.trigger', target: `${req.params.slug}/${build.id}`, details: { configurationId: build.configurationId, configurationName } });
       res.status(201).json(build);
     } catch (error) {
       next(error);
@@ -110,6 +113,7 @@ export function createBuildRoutes(
             const cancelled = await orchestrator.cancelBuild(req.params.id);
             if (cancelled) {
               const updated = await buildRepo.updateStatus(project.slug, req.params.id, 'cancelled');
+              auditLog?.append({ actor: AuditLog.actorOf(req), action: 'build.cancel', target: `${project.slug}/${req.params.id}` });
               res.json(updated);
               return;
             }

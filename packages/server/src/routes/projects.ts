@@ -7,8 +7,13 @@ import type {
 } from '@banshee-forge/shared';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { GitPollingService } from '../services/git-polling-service.js';
+import { AuditLog } from '../auth/audit-log.js';
 
-export function createProjectRoutes(projectRepo: ProjectRepository, pollingService?: GitPollingService): Router {
+export function createProjectRoutes(
+	projectRepo: ProjectRepository,
+	pollingService?: GitPollingService,
+	auditLog?: AuditLog
+): Router {
   const router = Router();
 
   // GET /api/v1/projects - List all projects
@@ -26,6 +31,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
     try {
       const input = req.body as CreateProjectInput;
       const project = await projectRepo.create(input);
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'project.create', target: project.slug, details: { name: project.name } });
       res.status(201).json(project);
     } catch (error) {
       next(error);
@@ -64,6 +70,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
       ))
         await pollingService.updateProject(req.params.slug);
 
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'project.update', target: req.params.slug });
       res.json(project);
     } catch (error) {
       next(error);
@@ -81,6 +88,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         res.status(404).json({ error: 'Not found', message: 'Project not found' });
         return;
       }
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'project.delete', target: req.params.slug });
       res.json({ success: true });
     } catch (error) {
       next(error);
@@ -127,6 +135,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
       }
 
       const status = await pollingService.pollNow(req.params.slug);
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'project.poll-now', target: req.params.slug });
       res.json(status);
     } catch (error) {
       next(error);
@@ -160,6 +169,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         res.status(404).json({ error: 'Not found', message: 'Project not found' });
         return;
       }
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'configuration.create', target: `${req.params.slug}/${config.id}`, details: { name: config.name } });
       res.status(201).json(config);
     } catch (error) {
       next(error);
@@ -193,6 +203,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         res.status(404).json({ error: 'Not found', message: 'Configuration not found' });
         return;
       }
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'configuration.update', target: `${req.params.slug}/${req.params.configId}` });
       res.json(config);
     } catch (error) {
       next(error);
@@ -207,6 +218,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         res.status(404).json({ error: 'Not found', message: 'Configuration not found' });
         return;
       }
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'configuration.delete', target: `${req.params.slug}/${req.params.configId}` });
       res.json({ success: true });
     } catch (error) {
       next(error);
@@ -260,6 +272,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         });
       }
 
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'script.update', target: `${req.params.slug}/${req.params.configId}/build`, details: { length: script?.length ?? 0 } });
       res.json({ success: true });
     } catch (error) {
       next(error);
@@ -310,6 +323,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         });
       }
 
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'script.update', target: `${req.params.slug}/${req.params.configId}/test`, details: { length: script?.length ?? 0 } });
       res.json({ success: true });
     } catch (error) {
       next(error);
@@ -331,6 +345,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         testScript: undefined,
       });
 
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'script.delete', target: `${req.params.slug}/${req.params.configId}/test` });
       res.json({ success: true });
     } catch (error) {
       next(error);
@@ -375,6 +390,7 @@ export function createProjectRoutes(projectRepo: ProjectRepository, pollingServi
         req.params.configId,
         script
       );
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'script.update', target: `${req.params.slug}/${req.params.configId}/fetch`, details: { length: script?.length ?? 0 } });
       res.json({ success: true });
     } catch (error) {
       next(error);
