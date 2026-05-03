@@ -52,7 +52,8 @@ export interface QueuedBuild {
 
 export interface QueueStatus {
   queue: QueuedBuild[];
-  activeBuildId: string | null;
+  /** IDs of builds currently executing on agents. Empty when nothing is running. */
+  activeBuildIds: string[];
 }
 
 // Build error types

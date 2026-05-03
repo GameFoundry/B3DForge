@@ -246,6 +246,11 @@ export function BuildDetail() {
                 Incremental
               </span>
             )}
+            {build.agentName && (
+              <span className="text-xs px-2 py-0.5 bg-purple-900/50 text-purple-300 rounded" title={`Agent ID: ${build.agentId}`}>
+                on {build.agentName}
+              </span>
+            )}
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import type { LogLevel, LogLine } from '@banshee-forge/shared';
+import type { LogLevel, LogLine } from '../types/execution.js';
 
 export interface ParseResult {
   level: LogLevel;
@@ -34,6 +34,7 @@ const WARNING_PATTERNS = [
   /^\s*warning:/i,           // CMake
 ];
 
+/** Classify a single log line into a level/phase, applying our marker grammar and pattern set. */
 export function parseLine(line: string): ParseResult {
   // Check for phase marker
   const phaseMatch = line.match(PHASE_REGEX);
@@ -76,7 +77,8 @@ export function parseLine(line: string): ParseResult {
   return { level: 'info', message: line };
 }
 
-// Parse full log text into structured lines
+/** Re-parse a complete log text into structured lines. Used by the server to expose a parsed log
+ *  view for already-completed builds. */
 export function parseLog(logText: string, startingPhase = 'init'): { lines: LogLine[], phases: string[] } {
   const lines: LogLine[] = [];
   const phases: string[] = [startingPhase];

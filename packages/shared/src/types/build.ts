@@ -47,6 +47,10 @@ export interface BuildSummary {
   warningCount: number;
   errorCount: number;
   testSummary?: TestSummary;
+  /** ID of the agent that ran (or is running) the build. Set when dispatched. */
+  agentId?: string;
+  /** Denormalized agent name for display. */
+  agentName?: string;
 }
 
 /** Commit info for a repository (main repo or submodule) */

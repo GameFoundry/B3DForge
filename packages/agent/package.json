@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
+  "bin": {
+    "bansheeforge-agent": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "clean": "rimraf dist",
@@ -11,7 +14,8 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@banshee-forge/shared": "workspace:*"
+    "@banshee-forge/shared": "workspace:*",
+    "socket.io-client": "^4.7.2"
   },
   "devDependencies": {
     "tsx": "^4.6.2",

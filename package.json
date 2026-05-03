@@ -4,7 +4,8 @@
   "private": true,
   "description": "BansheeForge - Continuous Integration for Banshee 3D",
   "scripts": {
-    "dev": "pnpm --parallel -r run dev",
+    "dev": "pnpm --parallel --filter @banshee-forge/server --filter @banshee-forge/web --filter @banshee-forge/shared run dev",
+    "dev:agent": "pnpm --filter @banshee-forge/agent run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",

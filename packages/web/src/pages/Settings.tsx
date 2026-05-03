@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useServerConfig, useUpdateServerConfig, useValidateDataPath } from '../hooks/useConfig';
+import { AgentTokens } from '../components/AgentTokens';
 
 export function Settings() {
   const { data: config, isLoading } = useServerConfig();
@@ -176,6 +177,9 @@ export function Settings() {
           )}
         </div>
       </div>
+
+      {/* Agent Tokens */}
+      <AgentTokens />
 
       {/* Server Info */}
       <div className="bg-gray-800 rounded-lg p-6">

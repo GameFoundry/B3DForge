@@ -7,6 +7,7 @@ import type {
   BuildTestResults, UnitTestOutput, TestSuite, AggregatedSnapshotResult,
   ComparisonResult, ReferenceInfo, ReferenceManifest,
   AuthMeResponse, LoginRequest,
+  AgentInfo, AgentTokenPublic,
 } from '@banshee-forge/shared';
 
 export interface ScriptResponse {
@@ -186,6 +187,28 @@ export const testsApi = {
     `${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/screenshot`,
   getDiffUrl: (buildId: string, testName: string) =>
     `${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/diff`,
+};
+
+// Agents API
+export const agentsApi = {
+  list: () => fetchJson<{ agents: AgentInfo[] }>(`${API_BASE}/agents`),
+  get: (id: string) => fetchJson<AgentInfo>(`${API_BASE}/agents/${id}`),
+};
+
+// Agent token API
+export interface CreatedAgentTokenResponse extends AgentTokenPublic {
+  plaintext: string;
+}
+
+export const agentTokensApi = {
+  list: () => fetchJson<{ tokens: AgentTokenPublic[] }>(`${API_BASE}/agent-tokens`),
+  create: (name: string) =>
+    fetchJson<CreatedAgentTokenResponse>(`${API_BASE}/agent-tokens`, {
+      method: 'POST', body: JSON.stringify({ name }),
+    }),
+  revoke: (id: string) =>
+    fetch(`${API_BASE}/agent-tokens/${id}`, { method: 'DELETE', credentials: 'include' })
+      .then(res => { if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`); }),
 };
 
 // References API

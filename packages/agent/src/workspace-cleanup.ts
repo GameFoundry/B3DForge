@@ -96,22 +96,4 @@ export class WorkspaceCleanup {
 
     return result;
   }
-
-  /**
-   * Force delete a specific configuration's workspace.
-   * Call this when a configuration is deleted.
-   */
-  async deleteConfigWorkspace(projectSlug: string, configId: string): Promise<boolean> {
-    const workspacePath = path.join(this.config.workspaceRoot, projectSlug, configId);
-
-    try {
-      await fs.rm(workspacePath, { recursive: true, force: true });
-      return true;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.error(`Failed to delete workspace for ${projectSlug}/${configId}:`, err);
-      }
-      return false;
-    }
-  }
 }

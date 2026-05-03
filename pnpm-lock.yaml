@@ -26,6 +26,9 @@ importers:
       '@banshee-forge/shared':
         specifier: workspace:*
         version: link:../shared
+      socket.io-client:
+        specifier: ^4.7.2
+        version: 4.8.3
     devDependencies:
       rimraf:
         specifier: ^5.0.0

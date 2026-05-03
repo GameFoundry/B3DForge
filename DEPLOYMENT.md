@@ -15,23 +15,56 @@ server as a service, and managing agent tokens.
 
 ## <a id="local-pm2-upgrade"></a>0. Local pm2 upgrade (existing local install)
 
-If you already run BansheeForge locally under pm2 (with `rebuild.sh`), to pick
-up the new authentication system:
+If you already run BansheeForge locally under pm2 (with `rebuild.sh`):
 
 ```bash
 cd Framework/Tools/BansheeForge
 
-# Install the new dependencies (bcryptjs, helmet, cookie-parser, etc.)
+# Install dependencies
 pnpm install
 
-# Build all packages and pm2 restart banshee-forge
+# Build all packages, provision a local agent token if missing, and
+# start/reload both pm2 apps (banshee-forge + banshee-forge-agent).
 ./rebuild.sh
 
-# Create your first user (you'll be prompted for a password)
+# Create your first user if you don't have one yet
 ./bsf-cli.sh user add admin
 ```
 
 Then open `http://localhost:3003` and sign in.
+
+`rebuild.sh` is now idempotent — running it on a fresh machine sets everything
+up in one shot, and running it after pulling new code rebuilds the dist files
+and triggers a graceful pm2 reload.
+
+### What this manages
+
+`pm2.config.cjs` defines two pm2 apps:
+
+| pm2 name | What it runs | Notes |
+| --- | --- | --- |
+| `banshee-forge`       | `packages/server/dist/index.js` | The orchestrator (web UI + REST + Socket.IO). |
+| `banshee-forge-agent` | `packages/agent/dist/index.js`  | A local build agent talking to `127.0.0.1:3003`. |
+
+The agent's bearer token is stored in `.agent-token` at the repository root.
+That file is created on first `./rebuild.sh` (via `bsf-cli.sh agent-token
+create local`) and is git-ignored. To rotate it, revoke the old one with
+`./bsf-cli.sh agent-token revoke <id>`, delete `.agent-token`, and run
+`./rebuild.sh` again.
+
+### Common operations
+
+```bash
+# Tail logs
+pm2 logs banshee-forge
+pm2 logs banshee-forge-agent
+
+# Restart just one app
+pm2 restart banshee-forge-agent
+
+# Stop everything
+pm2 stop pm2.config.cjs
+```
 
 **Behavior change to know about**: the server now binds to `127.0.0.1` by
 default instead of `0.0.0.0`. If you previously hit BansheeForge from another
@@ -176,14 +209,10 @@ nssm set BansheeForge AppDirectory "D:\BansheeForge"
 nssm start BansheeForge
 ```
 
-## 5. Agent tokens (Phase 2)
+## 5. Agent tokens
 
-The build agent (in `packages/agent`) is currently a placeholder. When it's
-implemented it will authenticate to the server with a bearer token instead of a
-session cookie. The token system is already wired so that no auth refactor is
-needed to add it later.
-
-Provision a token:
+Build agents authenticate to the server with a bearer token instead of a session
+cookie. Provision one on the orchestrator host:
 
 ```bash
 ./bsf-cli.sh agent-token create my-build-machine
@@ -192,12 +221,6 @@ Provision a token:
 The plaintext token is shown **once** and never again — store it somewhere safe.
 Only its bcrypt hash is persisted on disk.
 
-The agent (or any HTTP client representing a machine) sends it as:
-
-```
-Authorization: Bearer bsf_agt_<token>
-```
-
 Manage tokens:
 
 ```bash
@@ -205,10 +228,196 @@ Manage tokens:
 ./bsf-cli.sh agent-token revoke <id>
 ```
 
-Revoking a token immediately invalidates it; the next request with that token
-gets a 401.
+You can also do all three from the web UI under Settings → Agent Tokens.
 
-## 6. Audit log
+Revoking a token immediately invalidates it; the next request with that token
+gets a 401, and any open agent socket using it is dropped on the next
+authenticated operation.
+
+## <a id="remote-agent"></a>6. Remote build agents
+
+A build agent is a standalone Node.js process that connects out to the
+orchestrator over Socket.IO, advertises its platform/labels/capacity, and runs
+build jobs locally. Agents can run on any machine that can reach the
+orchestrator's HTTP/WebSocket port — different OS, different network, different
+provider — as long as outbound HTTPS works.
+
+The orchestrator picks an agent for each build based on the `platform` and
+`requiredLabels` declared on the configuration (see Configuration UI in the web
+app).
+
+### What the agent machine needs
+
+- **Node.js 20+**.
+- **git** (the agent runs `git` directly to capture submodule commits).
+- **bash**:
+  - On Linux/macOS: usually already present at `/bin/bash`.
+  - On Windows: install [Git for Windows](https://git-scm.com/download/win) so
+    Git Bash is available at `C:\Program Files\Git\bin\bash.exe`. (The agent
+    auto-detects it; override with `BSF_AGENT_BASH_PATH` if needed.)
+- **Network reachability** to the orchestrator URL on its HTTP/WebSocket port.
+  If the orchestrator is behind Caddy/HTTPS, the agent uses `wss://` automatically.
+- **Whatever your build needs** — compilers, SDKs, CMake, etc. The agent just
+  runs your `fetch.sh` / `build.sh` / `test.sh` scripts; the toolchain is your
+  responsibility.
+
+### Step 1 — provision a token
+
+On the orchestrator host:
+
+```bash
+./bsf-cli.sh agent-token create gpu-builder-01
+# Copy the printed bsf_agt_... value — you'll need it on the agent host.
+```
+
+### Step 2 — get the agent code on the remote machine
+
+The simplest path is to clone the BansheeForge sub-tree and build the agent
+package. From the agent host:
+
+```bash
+git clone <your-banshee-fork-url> banshee
+cd banshee/Framework/Tools/BansheeForge
+pnpm install
+pnpm --filter @banshee-forge/shared --filter @banshee-forge/agent build
+```
+
+This produces `packages/agent/dist/index.js`. (If you'd rather not clone the
+full engine on every agent host, you can `pnpm pack` the `agent` and `shared`
+packages locally and copy the tarballs.)
+
+### Step 3 — create an `agent.json`
+
+Either set environment variables or drop an `agent.json` next to the binary.
+The two are equivalent; env vars win on conflict.
+
+```json
+{
+	"orchestratorUrl": "https://forge.example.com",
+	"token": "bsf_agt_…",
+	"name": "gpu-builder-01",
+	"labels": ["gpu-nvidia"],
+	"maxParallelBuilds": 2
+}
+```
+
+Equivalent env vars:
+
+| Env var                         | Purpose                                                         |
+| ------------------------------- | --------------------------------------------------------------- |
+| `BSF_ORCHESTRATOR_URL`          | Base URL of the orchestrator, e.g. `https://forge.example.com`  |
+| `BSF_AGENT_TOKEN`               | Bearer token from `bsf-cli.sh agent-token create`               |
+| `BSF_AGENT_NAME`                | Human-readable name shown in the web UI                         |
+| `BSF_AGENT_LABELS`              | Comma-separated labels, e.g. `gpu-nvidia,high-mem`              |
+| `BSF_AGENT_MAX_PARALLEL`        | How many builds this agent runs in parallel (default 1)         |
+| `BSF_AGENT_WORKSPACE_ROOT`      | Where per-config build workspaces live (default `~/.bansheeforge-agent/workspaces`) |
+| `BSF_AGENT_SCRIPTS_ROOT`        | Where transient script bodies are written (default `~/.bansheeforge-agent/scripts`) |
+| `BSF_AGENT_TIMEOUT_MS`          | Default per-build timeout (default 1 hour)                      |
+| `BSF_AGENT_CONFIG`              | Explicit path to the `agent.json` file                          |
+
+### Step 4 — run the agent
+
+Quick sanity check:
+
+```bash
+# Linux/macOS
+BSF_ORCHESTRATOR_URL=https://forge.example.com \
+BSF_AGENT_TOKEN=bsf_agt_… \
+BSF_AGENT_NAME=gpu-builder-01 \
+BSF_AGENT_LABELS=gpu-nvidia \
+node packages/agent/dist/index.js
+```
+
+You should see `Connected to orchestrator` then `Registered (agentId=…)`. The
+agent will appear under **Agents** in the web UI.
+
+### Step 5 — keep it alive in production
+
+Pick whichever supervisor matches the agent host:
+
+#### Linux (systemd)
+
+`/etc/systemd/system/bansheeforge-agent.service`:
+
+```
+[Unit]
+Description=BansheeForge build agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bansheeforge
+WorkingDirectory=/opt/bansheeforge
+EnvironmentFile=/etc/bansheeforge-agent.env
+ExecStart=/usr/bin/node /opt/bansheeforge/packages/agent/dist/index.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`/etc/bansheeforge-agent.env` (mode `0600`, owned by the service user):
+
+```
+BSF_ORCHESTRATOR_URL=https://forge.example.com
+BSF_AGENT_TOKEN=bsf_agt_…
+BSF_AGENT_NAME=gpu-builder-01
+BSF_AGENT_LABELS=gpu-nvidia
+BSF_AGENT_MAX_PARALLEL=2
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now bansheeforge-agent
+sudo journalctl -u bansheeforge-agent -f
+```
+
+#### Windows (NSSM or pm2)
+
+NSSM:
+
+```cmd
+nssm install BansheeForgeAgent "C:\Program Files\nodejs\node.exe" ^
+	"D:\BansheeForge\packages\agent\dist\index.js"
+nssm set BansheeForgeAgent AppDirectory "D:\BansheeForge"
+nssm set BansheeForgeAgent AppEnvironmentExtra ^
+	BSF_ORCHESTRATOR_URL=https://forge.example.com ^
+	BSF_AGENT_TOKEN=bsf_agt_… ^
+	BSF_AGENT_NAME=win-builder-01
+nssm start BansheeForgeAgent
+```
+
+pm2:
+
+```bash
+pm2 start packages/agent/dist/index.js \
+	--name bansheeforge-agent \
+	--env BSF_ORCHESTRATOR_URL=https://forge.example.com \
+	--env BSF_AGENT_TOKEN=bsf_agt_…
+pm2 save
+```
+
+### Operational notes
+
+- **Reconnection**: agents reconnect automatically (exponential backoff up to
+  ~30 s). If the orchestrator restarts, the agent re-registers on its own.
+- **Mid-build disconnect**: if the agent loses the connection while a build is
+  running, the orchestrator marks that build `failed` with the message "Agent
+  disconnected mid-build". The build is not retried — re-trigger it manually.
+- **Firewalls**: the agent only opens an outbound TCP connection to the
+  orchestrator. No inbound port is required on the agent host.
+- **TLS**: `https://` URLs use `wss://` for the WebSocket leg; the cert is
+  validated by Node's defaults. If you're behind a private CA, set
+  `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` in the agent's environment.
+- **Artifacts and test results stay on the agent's disk** in v1 — they are not
+  uploaded back to the orchestrator. The build's log lines and phase timings
+  *are* streamed back, so the dashboard reflects status correctly. Plan to ship
+  artifacts elsewhere from inside your `build.sh` if you need them centrally
+  available (e.g. push to S3 / shared storage from the script).
+
+## 7. Audit log
 
 Mutating operations (create/update/delete projects and configurations, edit
 build/test/fetch scripts, trigger/cancel builds, change references, edit server
@@ -218,7 +427,7 @@ timestamp, actor (`user:<username>` or `agent:<name>`), action, and target.
 The log grows forever. Rotate it manually (e.g. with `logrotate` on Linux) or
 via a periodic script if it gets large.
 
-## 7. Operational checklist
+## 8. Operational checklist
 
 Before opening the firewall:
 
@@ -230,7 +439,7 @@ Before opening the firewall:
 - [ ] `curl https://forge.example.com/api/v1/projects` returns 401 (auth required)
 - [ ] Sign-in via the web UI works, then sign out works
 
-## 8. Things this deployment does NOT do
+## 9. Things this deployment does NOT do
 
 - No automatic password reset flow — use `bsf-cli user passwd <name>` to reset.
 - No 2FA / MFA — out of scope for this initial version.

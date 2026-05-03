@@ -19,6 +19,8 @@ import { GitPollingService } from './services/git-polling-service.js';
 import { ConfigService } from './services/config-service.js';
 import { TestResultsService } from './services/test-results-service.js';
 import { ImageComparisonService } from './services/image-comparison-service.js';
+import { AgentRegistry } from './services/agent-registry.js';
+import { AgentDispatcher } from './services/agent-dispatcher.js';
 import { TestResultsRepository } from './repositories/test-results-repository.js';
 import { ReferenceRepository } from './repositories/reference-repository.js';
 import { UsersRepository } from './auth/users-repository.js';
@@ -26,6 +28,9 @@ import { SessionsRepository } from './auth/sessions-repository.js';
 import { AgentTokensRepository } from './auth/agent-tokens-repository.js';
 import { createAuthMiddlewares, parseCookieHeader, resolveSessionUser, SESSION_COOKIE_NAME } from './auth/middleware.js';
 import { createAuthRoutes } from './auth/routes.js';
+import { createAgentRoutes } from './routes/agents.js';
+import { createAgentTokenRoutes } from './routes/agent-tokens.js';
+import { setupAgentNamespace } from './sockets/agent-namespace.js';
 import { AuditLog } from './auth/audit-log.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -98,12 +103,20 @@ const io = new SocketServer(httpServer, {
   cors: { origin: false, credentials: true }
 });
 
-// Initialize orchestrator
+// Initialize orchestrator + agent dispatch chain
 const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, testResultsService, {
-  workspaceRoot: path.join(DATA_PATH, 'workspaces'),
   dataPath: DATA_PATH,
-  defaultTimeoutMs: 60 * 60 * 1000,
 });
+const agentRegistry = new AgentRegistry();
+const agentDispatcher = new AgentDispatcher(
+  orchestrator.getQueue(),
+  agentRegistry,
+  orchestrator,
+  buildRepo,
+  projectRepo,
+  { dataPath: DATA_PATH },
+);
+orchestrator.setDispatcher(agentDispatcher);
 
 // Initialize git polling service
 const pollingService = new GitPollingService(projectRepo, buildRepo, orchestrator, io);
@@ -121,6 +134,8 @@ app.use('/api/v1', requireUser);
 
 app.use('/api/v1/projects', createProjectRoutes(projectRepo, pollingService, auditLog));
 app.use('/api/v1', createBuildRoutes(buildRepo, projectRepo, orchestrator, auditLog));
+app.use('/api/v1', createAgentRoutes(agentRegistry));
+app.use('/api/v1/agent-tokens', createAgentTokenRoutes(agentTokensRepo, auditLog));
 app.use('/api/v1/config', createConfigRoutes(configService, auditLog));
 app.use('/api/v1', createTestRoutes(
 	testResultsService,
@@ -165,6 +180,9 @@ if (webClientExists) {
     res.sendFile(path.join(webClientPath, 'index.html'));
   });
 }
+
+// Wire up the /agents namespace (bearer-token authed) for agent connections.
+setupAgentNamespace(io, agentTokensRepo, agentRegistry, agentDispatcher, orchestrator);
 
 // Authenticate every Socket.IO connection via the session cookie
 io.use(async (socket, next) => {

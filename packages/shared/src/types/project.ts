@@ -1,3 +1,11 @@
+import type { AgentPlatform } from './agent.js';
+
+/**
+ * Re-exported for convenience: the platform this build configuration targets, or `'any'` for no
+ * restriction. Used during build-to-agent matching by `AgentDispatcher`.
+ */
+export type ConfigurationPlatform = AgentPlatform | 'any';
+
 /** Watched repository for git polling */
 export interface WatchedRepository {
   id: string;
@@ -74,6 +82,12 @@ export interface BuildConfiguration {
   timeoutMs?: number;                // Override default timeout
   autoBuild: boolean;                // Include in auto-builds
   forceCleanBuild?: boolean;         // If true, always wipe workspace before build
+
+  // Agent matching
+  /** Required agent platform. Defaults to 'any'. */
+  platform?: ConfigurationPlatform;
+  /** Labels the agent must have to run this configuration (subset match). Defaults to []. */
+  requiredLabels?: string[];
 
   createdAt: string;
   updatedAt: string;

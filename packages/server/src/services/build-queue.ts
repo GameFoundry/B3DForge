@@ -2,102 +2,116 @@ import { EventEmitter } from 'events';
 import type { QueuedBuild, QueueStatus } from '@banshee-forge/shared';
 
 export interface BuildQueueEvents {
-  'build:ready': (job: QueuedBuild) => void;
-  'queue:updated': (status: QueueStatus) => void;
+	'queue:updated': (status: QueueStatus) => void;
+	'queue:enqueued': (job: QueuedBuild) => void;
 }
 
 export declare interface BuildQueue {
-  on<K extends keyof BuildQueueEvents>(event: K, listener: BuildQueueEvents[K]): this;
-  emit<K extends keyof BuildQueueEvents>(event: K, ...args: Parameters<BuildQueueEvents[K]>): boolean;
+	on<K extends keyof BuildQueueEvents>(event: K, listener: BuildQueueEvents[K]): this;
+	emit<K extends keyof BuildQueueEvents>(event: K, ...args: Parameters<BuildQueueEvents[K]>): boolean;
 }
 
+/**
+ * Priority queue of pending builds, plus a set of currently-active build IDs.
+ *
+ * The queue does not pull jobs itself. The dispatcher subscribes to `queue:enqueued`
+ * (and to agent-availability events) and decides when to start a build by calling
+ * `take(buildId)`, which removes the job from the pending queue and adds it to the
+ * active set. When a build finishes, the dispatcher calls `markComplete(buildId)`.
+ */
 export class BuildQueue extends EventEmitter {
-  private queue: QueuedBuild[] = [];
-  private activeBuildId: string | null = null;
-  private paused = false;
+	private queue: QueuedBuild[] = [];
+	private activeBuildIds: Set<string> = new Set();
+	private paused = false;
 
-  enqueue(buildId: string, projectSlug: string, priority = 0): void {
-    const job: QueuedBuild = {
-      buildId,
-      projectSlug,
-      priority,
-      queuedAt: new Date().toISOString(),
-    };
+	enqueue(buildId: string, projectSlug: string, priority = 0): void {
+		const job: QueuedBuild = {
+			buildId,
+			projectSlug,
+			priority,
+			queuedAt: new Date().toISOString(),
+		};
 
-    // Insert by priority (higher priority first)
-    const insertIndex = this.queue.findIndex(j => j.priority < priority);
-    if (insertIndex === -1) {
-      this.queue.push(job);
-    } else {
-      this.queue.splice(insertIndex, 0, job);
-    }
+		// Insert by priority (higher priority first, FIFO within priority)
+		const insertIndex = this.queue.findIndex(j => j.priority < priority);
+		if (insertIndex === -1) {
+			this.queue.push(job);
+		} else {
+			this.queue.splice(insertIndex, 0, job);
+		}
 
-    this.emitQueueUpdate();
-    this.processNext();
-  }
+		this.emitQueueUpdate();
+		if (!this.paused) this.emit('queue:enqueued', job);
+	}
 
-  dequeue(buildId: string): boolean {
-    const index = this.queue.findIndex(j => j.buildId === buildId);
-    if (index !== -1) {
-      this.queue.splice(index, 1);
-      this.emitQueueUpdate();
-      return true;
-    }
-    return false;
-  }
+	/** Remove a still-pending build from the queue. Returns true if it was present. */
+	dequeue(buildId: string): boolean {
+		const index = this.queue.findIndex(j => j.buildId === buildId);
+		if (index !== -1) {
+			this.queue.splice(index, 1);
+			this.emitQueueUpdate();
+			return true;
+		}
+		return false;
+	}
 
-  getStatus(): QueueStatus {
-    return {
-      queue: [...this.queue],
-      activeBuildId: this.activeBuildId,
-    };
-  }
+	/** Pending jobs in priority order (highest first). */
+	getPending(): QueuedBuild[] {
+		return [...this.queue];
+	}
 
-  isActive(buildId: string): boolean {
-    return this.activeBuildId === buildId;
-  }
+	/** Move a pending job into the active set. Returns the job that was taken, or null. */
+	take(buildId: string): QueuedBuild | null {
+		const index = this.queue.findIndex(j => j.buildId === buildId);
+		if (index === -1) return null;
+		const [job] = this.queue.splice(index, 1);
+		this.activeBuildIds.add(buildId);
+		this.emitQueueUpdate();
+		return job;
+	}
 
-  markComplete(buildId: string): void {
-    if (this.activeBuildId === buildId) {
-      this.activeBuildId = null;
-      this.emitQueueUpdate();
-      this.processNext();
-    }
-  }
+	getStatus(): QueueStatus {
+		return {
+			queue: [...this.queue],
+			activeBuildIds: Array.from(this.activeBuildIds),
+		};
+	}
 
-  // For recovery: set active build without triggering processing
-  setActive(buildId: string): void {
-    this.activeBuildId = buildId;
-    this.emitQueueUpdate();
-  }
+	isActive(buildId: string): boolean {
+		return this.activeBuildIds.has(buildId);
+	}
 
-  // For recovery: add to queue without triggering processing
-  addToQueueSilent(job: QueuedBuild): void {
-    this.queue.push(job);
-    this.queue.sort((a, b) => b.priority - a.priority);
-  }
+	markComplete(buildId: string): void {
+		if (this.activeBuildIds.delete(buildId)) {
+			this.emitQueueUpdate();
+		}
+	}
 
-  pause(): void {
-    this.paused = true;
-  }
+	/** For recovery: declare a build active without taking it from the pending queue (since it's not there). */
+	setActive(buildId: string): void {
+		this.activeBuildIds.add(buildId);
+		this.emitQueueUpdate();
+	}
 
-  resume(): void {
-    this.paused = false;
-    this.processNext();
-  }
+	/** For recovery: add to queue without firing `queue:enqueued` so the dispatcher waits until `resume()`. */
+	addToQueueSilent(job: QueuedBuild): void {
+		this.queue.push(job);
+		this.queue.sort((a, b) => b.priority - a.priority);
+	}
 
-  private processNext(): void {
-    if (this.paused || this.activeBuildId !== null || this.queue.length === 0) {
-      return;
-    }
+	pause(): void {
+		this.paused = true;
+	}
 
-    const next = this.queue.shift()!;
-    this.activeBuildId = next.buildId;
-    this.emit('build:ready', next);
-    this.emitQueueUpdate();
-  }
+	/** Re-emit `queue:enqueued` for every pending job so the dispatcher can pick them up. */
+	resume(): void {
+		this.paused = false;
+		for (const job of this.queue) {
+			this.emit('queue:enqueued', job);
+		}
+	}
 
-  private emitQueueUpdate(): void {
-    this.emit('queue:updated', this.getStatus());
-  }
+	private emitQueueUpdate(): void {
+		this.emit('queue:updated', this.getStatus());
+	}
 }

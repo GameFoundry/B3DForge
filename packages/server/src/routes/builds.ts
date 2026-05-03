@@ -149,7 +149,7 @@ export function createBuildRoutes(
   // GET /api/v1/builds/:id/log/parsed - Get parsed log lines
   router.get('/builds/:id/log/parsed', async (req, res, next) => {
     try {
-      const { parseLog } = await import('../services/log-parser.js');
+      const { parseLog } = await import('@banshee-forge/shared');
       const projects = await projectRepo.findAll();
 
       for (const project of projects) {

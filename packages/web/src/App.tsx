@@ -8,6 +8,7 @@ import { CreateProject } from './pages/CreateProject';
 import { ProjectDetail } from './pages/ProjectDetail';
 import { BuildDetail } from './pages/BuildDetail';
 import { Settings } from './pages/Settings';
+import { Agents } from './pages/Agents';
 
 const queryClient = new QueryClient();
 
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="projects/new" element={<CreateProject />} />
               <Route path="projects/:slug" element={<ProjectDetail />} />
               <Route path="builds/:id" element={<BuildDetail />} />
+              <Route path="agents" element={<Agents />} />
               <Route path="settings" element={<Settings />} />
             </Route>
           </Routes>

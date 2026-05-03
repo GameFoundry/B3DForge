@@ -5,3 +5,4 @@ export * from './api.js';
 export * from './execution.js';
 export * from './config.js';
 export * from './auth.js';
+export * from './agent.js';

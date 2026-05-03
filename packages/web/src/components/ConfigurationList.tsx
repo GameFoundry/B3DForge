@@ -131,9 +131,12 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
   const [buildType, setBuildType] = useState('RelWithDebInfo');
   const [autoBuild, setAutoBuild] = useState(true);
   const [forceCleanBuild, setForceCleanBuild] = useState(false);
+  const [platform, setPlatform] = useState<'any' | 'win32' | 'linux' | 'darwin'>('any');
+  const [labelsText, setLabelsText] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const requiredLabels = labelsText.split(',').map(s => s.trim()).filter(Boolean);
     onSubmit({
       name,
       description: description || undefined,
@@ -141,6 +144,8 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
       buildType: buildType || undefined,
       autoBuild,
       forceCleanBuild,
+      platform,
+      requiredLabels: requiredLabels.length ? requiredLabels : undefined,
     });
   };
 
@@ -213,6 +218,37 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
         </div>
       </label>
 
+      <div>
+        <label className="block text-sm text-gray-400 mb-1">Required platform</label>
+        <select
+          value={platform}
+          onChange={(e) => setPlatform(e.target.value as typeof platform)}
+          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="any">Any platform</option>
+          <option value="win32">Windows</option>
+          <option value="linux">Linux</option>
+          <option value="darwin">macOS</option>
+        </select>
+        <p className="text-xs text-gray-500 mt-1">
+          Builds run only on agents matching this platform.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-sm text-gray-400 mb-1">Required agent labels</label>
+        <input
+          type="text"
+          value={labelsText}
+          onChange={(e) => setLabelsText(e.target.value)}
+          placeholder="e.g. gpu-nvidia, high-mem (comma-separated)"
+          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Agent must declare every label listed here. Leave empty to allow any agent.
+        </p>
+      </div>
+
       <div className="flex justify-end gap-2 pt-2">
         <button
           type="button"
@@ -268,6 +304,10 @@ function ConfigurationItem({
   const [buildType, setBuildType] = useState(configuration.buildType ?? '');
   const [autoBuild, setAutoBuild] = useState(configuration.autoBuild);
   const [forceCleanBuild, setForceCleanBuild] = useState(configuration.forceCleanBuild ?? false);
+  const [platform, setPlatform] = useState<'any' | 'win32' | 'linux' | 'darwin'>(
+    (configuration.platform as 'any' | 'win32' | 'linux' | 'darwin') ?? 'any'
+  );
+  const [labelsText, setLabelsText] = useState((configuration.requiredLabels ?? []).join(', '));
 
   // Script hooks
   const { data: fetchScriptData } = useConfigurationFetchScript(projectSlug, configuration.id);
@@ -280,12 +320,15 @@ function ConfigurationItem({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    const requiredLabels = labelsText.split(',').map(s => s.trim()).filter(Boolean);
     onSave({
       name,
       description: description || undefined,
       buildType: buildType || undefined,
       autoBuild,
       forceCleanBuild,
+      platform,
+      requiredLabels: requiredLabels.length ? requiredLabels : [],
     });
   };
 
@@ -464,6 +507,29 @@ function ConfigurationItem({
                   <p className="text-xs text-gray-500">Wipe workspace before every build (disables incremental builds)</p>
                 </div>
               </label>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Required platform</label>
+                <select
+                  value={platform}
+                  onChange={(e) => setPlatform(e.target.value as typeof platform)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
+                >
+                  <option value="any">Any platform</option>
+                  <option value="win32">Windows</option>
+                  <option value="linux">Linux</option>
+                  <option value="darwin">macOS</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Required agent labels</label>
+                <input
+                  type="text"
+                  value={labelsText}
+                  onChange={(e) => setLabelsText(e.target.value)}
+                  placeholder="comma-separated, e.g. gpu-nvidia, high-mem"
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
+                />
+              </div>
               <div className="flex justify-end gap-2">
                 <button
                   type="button"

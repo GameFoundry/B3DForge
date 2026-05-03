@@ -11,6 +11,9 @@ build/
 .env.local
 .env.*.local
 
+# Local agent token (written by rebuild.sh, never commit)
+.agent-token
+
 # Data storage (keep structure, ignore contents)
 data/projects/*.json
 data/projects/*/
