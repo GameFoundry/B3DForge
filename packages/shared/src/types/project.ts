@@ -71,6 +71,14 @@ export interface BuildConfiguration {
   buildScript: ScriptConfig;         // Always bash
   testScript?: ScriptConfig;         // Optional, always bash
 
+  /**
+   * When true the configuration uses its own fetch script stored at
+   * `projects/{slug}/configs/{configId}/fetch.sh`. When false/undefined the
+   * configuration inherits the project-level fetch script at
+   * `projects/{slug}/fetch.sh`.
+   */
+  overrideFetchScript?: boolean;
+
   // Build settings
   buildType?: string;                // e.g., "Debug", "Release", "RelWithDebInfo"
 
@@ -80,7 +88,6 @@ export interface BuildConfiguration {
 
   // Settings
   timeoutMs?: number;                // Override default timeout
-  autoBuild: boolean;                // Include in auto-builds
   forceCleanBuild?: boolean;         // If true, always wipe workspace before build
 
   // Agent matching
@@ -116,6 +123,12 @@ export interface Project {
   autoBuild: boolean;                // Master switch for auto-builds
   pollInterval: number;              // seconds
   watchedRepositories?: WatchedRepository[];  // Repos to poll for changes
+  /**
+   * Configuration IDs to launch when polling activates a build. When undefined
+   * defaults to `[defaultConfigurationId]` (only the default configuration is
+   * launched). An empty array disables polling-triggered builds entirely.
+   */
+  pollingConfigurationIds?: string[];
 
   // Git state
   lastCommit?: string;

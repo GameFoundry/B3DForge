@@ -87,6 +87,22 @@ export function AutoBuildSettings({ project }: AutoBuildSettingsProps) {
     pollNow.mutate(project.slug);
   };
 
+  // Resolved list of configuration IDs that polling should launch. Falls
+  // back to the default configuration when the project has not been
+  // configured yet (matches server-side behavior).
+  const selectedPollingIds: string[] = project.pollingConfigurationIds
+    ?? (project.defaultConfigurationId ? [project.defaultConfigurationId] : []);
+
+  const handleTogglePollingConfig = (configId: string, checked: boolean) => {
+    const next = checked
+      ? Array.from(new Set([...selectedPollingIds, configId]))
+      : selectedPollingIds.filter(id => id !== configId);
+    updateProject.mutate({
+      slug: project.slug,
+      input: { pollingConfigurationIds: next },
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Auto-Build Toggle */}
@@ -112,6 +128,41 @@ export function AutoBuildSettings({ project }: AutoBuildSettingsProps) {
             />
           </button>
         </div>
+      </div>
+
+      {/* Configurations to Build */}
+      <div className="bg-gray-800 rounded-lg p-4">
+        <h3 className="text-sm font-medium text-gray-200">Configurations to Build</h3>
+        <p className="text-xs text-gray-400 mt-1 mb-3">
+          When polling detects new commits, builds are launched for the configurations checked below.
+        </p>
+        {project.configurations.length === 0 ? (
+          <p className="text-sm text-gray-500">No configurations defined.</p>
+        ) : (
+          <div className="space-y-2">
+            {project.configurations.map(config => {
+              const isDefault = config.id === project.defaultConfigurationId;
+              const isChecked = selectedPollingIds.includes(config.id);
+              return (
+                <label key={config.id} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={e => handleTogglePollingConfig(config.id, e.target.checked)}
+                    disabled={updateProject.isPending}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
+                  />
+                  <span className="text-sm text-gray-200">{config.name}</span>
+                  {isDefault && (
+                    <span className="text-xs px-2 py-0.5 bg-blue-900/50 text-blue-300 rounded">
+                      Default
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Poll Interval */}

@@ -356,6 +356,40 @@ export function createProjectRoutes(
   // Fetch script endpoints (always local bash)
   // ============================================
 
+  // GET /api/v1/projects/:slug/scripts/fetch
+  // Project-level fetch script — inherited by all configurations whose
+  // `overrideFetchScript` flag is not set.
+  router.get('/:slug/scripts/fetch', async (req, res, next) => {
+    try {
+      const project = await projectRepo.findBySlug(req.params.slug);
+      if (!project) {
+        res.status(404).json({ error: 'Not found', message: 'Project not found' });
+        return;
+      }
+      const script = await projectRepo.getProjectFetchScript(req.params.slug);
+      res.json({ script: script ?? '' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // PUT /api/v1/projects/:slug/scripts/fetch
+  router.put('/:slug/scripts/fetch', async (req, res, next) => {
+    try {
+      const project = await projectRepo.findBySlug(req.params.slug);
+      if (!project) {
+        res.status(404).json({ error: 'Not found', message: 'Project not found' });
+        return;
+      }
+      const { script } = req.body as { script: string };
+      await projectRepo.saveProjectFetchScript(req.params.slug, script);
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'script.update', target: `${req.params.slug}/fetch`, details: { length: script?.length ?? 0 } });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // GET /api/v1/projects/:slug/configurations/:configId/scripts/fetch
   router.get('/:slug/configurations/:configId/scripts/fetch', async (req, res, next) => {
     try {

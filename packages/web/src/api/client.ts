@@ -115,6 +115,12 @@ export const projectsApi = {
     fetchJson<PollingStatus>(`${API_BASE}/projects/${slug}/poll-now`, { method: 'POST' }),
 
   // Fetch script endpoints (always local bash)
+  getProjectFetchScript: (slug: string) =>
+    fetchJson<{ script: string }>(`${API_BASE}/projects/${slug}/scripts/fetch`),
+  updateProjectFetchScript: (slug: string, script: string) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/projects/${slug}/scripts/fetch`, {
+      method: 'PUT', body: JSON.stringify({ script })
+    }),
   getConfigurationFetchScript: (slug: string, configId: string) =>
     fetchJson<{ script: string }>(`${API_BASE}/projects/${slug}/configurations/${configId}/scripts/fetch`),
   updateConfigurationFetchScript: (slug: string, configId: string, script: string) =>

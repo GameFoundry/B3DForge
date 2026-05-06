@@ -231,6 +231,26 @@ export class ProjectRepository {
   // Fetch script methods (always local bash)
   // ============================================
 
+  /**
+   * Project-level fetch script. Used by every configuration that does not
+   * set `overrideFetchScript` to true.
+   */
+  async getProjectFetchScript(slug: string): Promise<string | null> {
+    return this.storage.readText(`projects/${slug}/fetch.sh`);
+  }
+
+  async saveProjectFetchScript(slug: string, content: string): Promise<void> {
+    await this.storage.writeText(`projects/${slug}/fetch.sh`, content);
+  }
+
+  async deleteProjectFetchScript(slug: string): Promise<void> {
+    await this.storage.delete(`projects/${slug}/fetch.sh`);
+  }
+
+  /**
+   * Per-configuration fetch script. Only used when the configuration sets
+   * `overrideFetchScript` to true.
+   */
   async getConfigurationFetchScript(slug: string, configId: string): Promise<string | null> {
     return this.storage.readText(`projects/${slug}/configs/${configId}/fetch.sh`);
   }

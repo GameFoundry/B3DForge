@@ -11,6 +11,8 @@ import {
   useDeleteConfigurationTestScript,
   useConfigurationFetchScript,
   useUpdateConfigurationFetchScript,
+  useProjectFetchScript,
+  useUpdateProjectFetchScript,
 } from '../hooks/useProjects';
 import { ScriptEditor } from './ScriptEditor';
 
@@ -59,7 +61,9 @@ export function ConfigurationList({ project }: ConfigurationListProps) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <ProjectFetchScript projectSlug={project.slug} />
+
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-100">Build Configurations</h2>
         <button
@@ -129,7 +133,6 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [buildType, setBuildType] = useState('RelWithDebInfo');
-  const [autoBuild, setAutoBuild] = useState(true);
   const [forceCleanBuild, setForceCleanBuild] = useState(false);
   const [platform, setPlatform] = useState<'any' | 'win32' | 'linux' | 'darwin'>('any');
   const [labelsText, setLabelsText] = useState('');
@@ -142,7 +145,6 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
       description: description || undefined,
       buildScript: { source: 'local' },
       buildType: buildType || undefined,
-      autoBuild,
       forceCleanBuild,
       platform,
       requiredLabels: requiredLabels.length ? requiredLabels : undefined,
@@ -194,16 +196,6 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
           Passed to build script as $BUILD_TYPE environment variable
         </p>
       </div>
-
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={autoBuild}
-          onChange={(e) => setAutoBuild(e.target.checked)}
-          className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
-        />
-        <span className="text-sm text-gray-300">Include in automatic builds</span>
-      </label>
 
       <label className="flex items-center gap-2">
         <input
@@ -302,7 +294,6 @@ function ConfigurationItem({
   const [name, setName] = useState(configuration.name);
   const [description, setDescription] = useState(configuration.description ?? '');
   const [buildType, setBuildType] = useState(configuration.buildType ?? '');
-  const [autoBuild, setAutoBuild] = useState(configuration.autoBuild);
   const [forceCleanBuild, setForceCleanBuild] = useState(configuration.forceCleanBuild ?? false);
   const [platform, setPlatform] = useState<'any' | 'win32' | 'linux' | 'darwin'>(
     (configuration.platform as 'any' | 'win32' | 'linux' | 'darwin') ?? 'any'
@@ -325,7 +316,6 @@ function ConfigurationItem({
       name,
       description: description || undefined,
       buildType: buildType || undefined,
-      autoBuild,
       forceCleanBuild,
       platform,
       requiredLabels: requiredLabels.length ? requiredLabels : [],
@@ -390,11 +380,6 @@ function ConfigurationItem({
               {isDefault && (
                 <span className="text-xs px-2 py-0.5 bg-blue-900/50 text-blue-300 rounded">
                   Default
-                </span>
-              )}
-              {configuration.autoBuild && (
-                <span className="text-xs px-2 py-0.5 bg-green-900/50 text-green-300 rounded">
-                  Auto-build
                 </span>
               )}
               {configuration.forceCleanBuild && (
@@ -489,15 +474,6 @@ function ConfigurationItem({
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={autoBuild}
-                  onChange={(e) => setAutoBuild(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
-                />
-                <span className="text-sm text-gray-300">Include in automatic builds</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
                   checked={forceCleanBuild}
                   onChange={(e) => setForceCleanBuild(e.target.checked)}
                   className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
@@ -549,17 +525,41 @@ function ConfigurationItem({
             </form>
           ) : (
             <>
-              {/* Fetch Script - always local bash */}
-              <ScriptEditor
-                title="Fetch Script"
-                description="Clones the repository and checks out the target branch/commit"
-                placeholder="Enter your fetch script here..."
-                fileName="fetch.sh"
-                configId={configuration.id}
-                script={fetchScriptData?.script ?? ''}
-                onSave={handleSaveFetchScript}
-                isSaving={updateFetchScript.isPending}
-              />
+              {/* Fetch Script - either inherited from the project or overridden per-config */}
+              <div className="bg-gray-900/40 rounded-lg p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-200">Fetch Script</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Clones the repository and checks out the target branch/commit.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 shrink-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={configuration.overrideFetchScript ?? false}
+                      onChange={(e) => onSave({ overrideFetchScript: e.target.checked })}
+                      className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
+                    />
+                    <span className="text-xs text-gray-300">Override project fetch script</span>
+                  </label>
+                </div>
+                {configuration.overrideFetchScript ? (
+                  <ScriptEditor
+                    title="Custom Fetch Script"
+                    placeholder="Enter your fetch script here..."
+                    fileName="fetch.sh"
+                    configId={configuration.id}
+                    script={fetchScriptData?.script ?? ''}
+                    onSave={handleSaveFetchScript}
+                    isSaving={updateFetchScript.isPending}
+                  />
+                ) : (
+                  <p className="text-xs text-gray-400 italic">
+                    Using the project-level fetch script defined above.
+                  </p>
+                )}
+              </div>
 
               {/* Build Script */}
               <ScriptEditor
@@ -597,6 +597,38 @@ function ConfigurationItem({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+interface ProjectFetchScriptProps {
+  projectSlug: string;
+}
+
+function ProjectFetchScript({ projectSlug }: ProjectFetchScriptProps) {
+  const { data } = useProjectFetchScript(projectSlug);
+  const updateScript = useUpdateProjectFetchScript();
+
+  const handleSave = (script: string) => {
+    updateScript.mutate({ slug: projectSlug, script });
+  };
+
+  return (
+    <div className="bg-gray-800 rounded-lg p-4 space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-100">Project Fetch Script</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Shared by every configuration unless that configuration overrides it.
+        </p>
+      </div>
+      <ScriptEditor
+        title="Fetch Script"
+        placeholder="Enter your fetch script here..."
+        fileName="fetch.sh"
+        script={data?.script ?? ''}
+        onSave={handleSave}
+        isSaving={updateScript.isPending}
+      />
     </div>
   );
 }

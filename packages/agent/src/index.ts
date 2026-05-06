@@ -4,6 +4,7 @@ import { AgentConfig, loadConfig } from './config.js';
 import { OrchestratorClient } from './orchestrator-client.js';
 import { BuildExecutor } from './build-executor.js';
 import { WorkspaceCleanup } from './workspace-cleanup.js';
+import { uploadResults } from './results-uploader.js';
 
 const VERSION = '0.1.0';
 
@@ -112,15 +113,38 @@ async function runBuild(
 		client.sendPhase({ buildId, phase, action: 'end' });
 	});
 	executor.on('complete', (status, exitCode) => {
-		client.sendComplete({
-			buildId,
-			status,
-			exitCode,
-			repositoryCommits: executor.getRepositoryCommits(),
-		});
-		activeExecutors.delete(buildId);
-		client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });
-		console.log(`Build ${buildId} ${status} (exit ${exitCode})`);
+		// Upload test results before signalling completion so the orchestrator
+		// can parse them when handling agent:complete.
+		const resultsDir = executor.getResultsDir();
+		const finalize = async () => {
+			if (resultsDir) {
+				try {
+					const summary = await uploadResults({
+						orchestratorUrl: config.orchestratorUrl,
+						token: config.token,
+						projectSlug: assignment.project.slug,
+						buildId,
+						resultsDir,
+					});
+					if (summary.uploaded + summary.failed + summary.skipped > 0) {
+						console.log(`[results-upload] build ${buildId}: uploaded=${summary.uploaded} failed=${summary.failed} skipped=${summary.skipped}`);
+					}
+				} catch (err) {
+					console.warn(`[results-upload] build ${buildId} aborted:`, err);
+				}
+			}
+
+			client.sendComplete({
+				buildId,
+				status,
+				exitCode,
+				repositoryCommits: executor.getRepositoryCommits(),
+			});
+			activeExecutors.delete(buildId);
+			client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });
+			console.log(`Build ${buildId} ${status} (exit ${exitCode})`);
+		};
+		finalize().catch(err => console.error(`Finalize failed for build ${buildId}:`, err));
 	});
 	executor.on('error', (code, message) => {
 		client.sendError({ buildId, code, message });

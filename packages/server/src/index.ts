@@ -30,8 +30,10 @@ import { createAuthMiddlewares, parseCookieHeader, resolveSessionUser, SESSION_C
 import { createAuthRoutes } from './auth/routes.js';
 import { createAgentRoutes } from './routes/agents.js';
 import { createAgentTokenRoutes } from './routes/agent-tokens.js';
+import { createAgentDataRoutes } from './routes/agent-data.js';
 import { setupAgentNamespace } from './sockets/agent-namespace.js';
 import { AuditLog } from './auth/audit-log.js';
+import { runMigrations } from './migrate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,6 +52,9 @@ console.log(`Configuration loaded from: ${configSource}`);
 console.log(`Data path: ${DATA_PATH}`);
 console.log(`Bind: ${BIND_HOST}:${PORT}`);
 
+// Run any pending data migrations before any repository touches the on-disk state.
+await runMigrations(DATA_PATH);
+
 // Initialize storage and repositories
 const storage = new JsonFileStorage(DATA_PATH);
 const projectRepo = new ProjectRepository(storage);
@@ -62,7 +67,7 @@ const usersRepo = new UsersRepository(storage);
 const sessionsRepo = new SessionsRepository(storage);
 const agentTokensRepo = new AgentTokensRepository(storage);
 const auditLog = new AuditLog(DATA_PATH);
-const { requireUser } = createAuthMiddlewares(usersRepo, sessionsRepo, agentTokensRepo);
+const { requireUser, requireAgent } = createAuthMiddlewares(usersRepo, sessionsRepo, agentTokensRepo);
 
 // Periodically clean up expired sessions
 setInterval(() => {
@@ -128,6 +133,9 @@ app.use('/api/v1/auth', createAuthRoutes(usersRepo, sessionsRepo, { cookieSecure
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Agent data uploads use bearer-token auth (requireAgent), so mount before requireUser.
+app.use('/api/v1/agent', createAgentDataRoutes({ dataPath: DATA_PATH }, requireAgent));
 
 // All API endpoints below this line require an authenticated user
 app.use('/api/v1', requireUser);

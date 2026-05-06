@@ -77,7 +77,6 @@ export function CreateProject() {
       testScript,
       configSchema,
       defaultConfig: defaultConfigValues,
-      autoBuild: true,
       createdAt: now,
       updatedAt: now,
     };

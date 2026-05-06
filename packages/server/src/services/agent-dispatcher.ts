@@ -200,12 +200,12 @@ export class AgentDispatcher {
 	): Promise<BuildAssignment | null> {
 		if (!configuration) return null;
 
-		const fetch = await this.scriptToPayload(
-			{ source: 'local' },
-			project.slug,
-			configuration.id,
-			'fetch.sh',
-		);
+		// Fetch script resolution: per-configuration when `overrideFetchScript`
+		// is set, otherwise the shared project-level fetch script.
+		const fetchPath = configuration.overrideFetchScript
+			? path.join(this.config.dataPath, 'projects', project.slug, 'configs', configuration.id, 'fetch.sh')
+			: path.join(this.config.dataPath, 'projects', project.slug, 'fetch.sh');
+		const fetch = await this.readToInline(fetchPath);
 		if (!fetch || fetch.kind !== 'inline') return null;
 
 		const buildScript = await this.scriptToPayload(

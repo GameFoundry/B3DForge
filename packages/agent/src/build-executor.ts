@@ -59,6 +59,7 @@ export class BuildExecutor extends EventEmitter {
 	private killed = false;
 	private timeoutId: NodeJS.Timeout | null = null;
 	private repositoryCommits: RepositoryCommitInfo[] = [];
+	private resultsDir: string | null = null;
 
 	private logBuffer: LogLine[] = [];
 	private logFlushTimer: NodeJS.Timeout | null = null;
@@ -75,11 +76,13 @@ export class BuildExecutor extends EventEmitter {
 		const configId = configuration?.id ?? 'default';
 
 		const workspace = path.join(this.config.workspaceRoot, project.slug, configId);
-		// Per-build paths kept on the agent. Artifacts/results aren't transferred in v1.
+		// Per-build paths kept on the agent. Test results are uploaded to the orchestrator
+		// at end of build so they appear in the build detail UI; artifacts stay local.
 		const buildLocalDir = path.join(this.config.workspaceRoot, '..', 'builds', build.id);
 		const resultsDir = path.join(buildLocalDir, 'results');
 		const artifactsDir = path.join(buildLocalDir, 'artifacts');
 		const scriptsDir = path.join(this.config.scriptsRoot, build.id);
+		this.resultsDir = resultsDir;
 
 		const shouldClean = build.cleanBuild || configuration?.forceCleanBuild;
 
@@ -248,6 +251,7 @@ export class BuildExecutor extends EventEmitter {
 	getWarningCount(): number { return this.warningCount; }
 	getErrorCount(): number { return this.errorCount; }
 	getRepositoryCommits(): RepositoryCommitInfo[] { return [...this.repositoryCommits]; }
+	getResultsDir(): string | null { return this.resultsDir; }
 
 	private async writeInlineScript(scriptsDir: string, name: string, body: string): Promise<string> {
 		const filePath = path.join(scriptsDir, name);

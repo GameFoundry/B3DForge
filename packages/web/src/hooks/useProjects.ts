@@ -180,6 +180,27 @@ export function useDeleteConfigurationTestScript() {
   });
 }
 
+// Project-level fetch script hooks (inherited by all configurations whose
+// `overrideFetchScript` flag is not set).
+export function useProjectFetchScript(slug: string) {
+  return useQuery({
+    queryKey: ['projects', slug, 'scripts', 'fetch'],
+    queryFn: () => projectsApi.getProjectFetchScript(slug),
+    enabled: !!slug,
+  });
+}
+
+export function useUpdateProjectFetchScript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slug, script }: { slug: string; script: string }) =>
+      projectsApi.updateProjectFetchScript(slug, script),
+    onSuccess: (_, { slug }) => {
+      queryClient.invalidateQueries({ queryKey: ['projects', slug, 'scripts', 'fetch'] });
+    },
+  });
+}
+
 // Configuration fetch script hooks (always local bash)
 export function useConfigurationFetchScript(slug: string, configId: string) {
   return useQuery({

@@ -189,8 +189,13 @@ export class GitPollingService {
     if (hasNewCommits) {
       await this.projectRepo.update(slug, { watchedRepositories: updatedRepos });
 
-      // Trigger builds for all configurations with autoBuild enabled
-      const autoConfigs = (project.configurations ?? []).filter(c => c.autoBuild);
+      // Trigger builds only for the configurations the user selected for
+      // polling. When unset, fall back to the project's default configuration
+      // (so existing projects keep their previous "single build per poll"
+      // behavior).
+      const targetIds = project.pollingConfigurationIds
+        ?? (project.defaultConfigurationId ? [project.defaultConfigurationId] : []);
+      const autoConfigs = (project.configurations ?? []).filter(c => targetIds.includes(c.id));
       for (const config of autoConfigs) {
         try {
           const build = await this.buildRepo.create(slug, {
