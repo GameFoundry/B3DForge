@@ -34,6 +34,14 @@ echo
 echo "Starting/reloading pm2 apps..."
 pm2 startOrReload pm2.config.cjs
 
+# Persist the current process list so pm2 resurrects both apps after a reboot.
+# Without this, `pm2 startOrReload` only updates the live session — pm2's saved
+# dump file would still reflect whatever was running when `pm2 save` was last
+# called, and a fresh boot would bring back only the old set of apps.
+echo
+echo "Saving pm2 process list..."
+pm2 save
+
 echo
 echo "Done. View logs with:  pm2 logs banshee-forge       (server)"
 echo "                       pm2 logs banshee-forge-agent (agent)"
