@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCreateProject } from '../hooks/useProjects';
-import type { CreateProjectInput, ScriptConfig, BuildConfiguration, ConfigSchema, ProjectConfig } from '@banshee-forge/shared';
+import type { CreateProjectInput, BuildConfiguration, ConfigSchema, ProjectConfig } from '@banshee-forge/shared';
 
 export function CreateProject() {
   const navigate = useNavigate();
@@ -12,18 +12,6 @@ export function CreateProject() {
   const [gitUrl, setGitUrl] = useState('');
   const [gitBranch, setGitBranch] = useState('master');
 
-  // Build script (always bash): 'repo' or 'local' (CI server)
-  const [buildScriptSource, setBuildScriptSource] = useState<'repo' | 'local'>('local');
-  const [buildScriptRepoPath, setBuildScriptRepoPath] = useState('.ci/build.sh');
-
-  // Test script (optional, always bash)
-  const [hasTestScript, setHasTestScript] = useState(false);
-  const [testScriptSource, setTestScriptSource] = useState<'repo' | 'local'>('local');
-  const [testScriptRepoPath, setTestScriptRepoPath] = useState('.ci/test.sh');
-
-  const [autoBuild, setAutoBuild] = useState(false);
-  const [pollInterval, setPollInterval] = useState(300);
-
   const generateSlug = (name: string) => {
     return name
       .toLowerCase()
@@ -33,19 +21,6 @@ export function CreateProject() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Build script configuration for default config (always bash)
-    const buildScript: ScriptConfig = { source: buildScriptSource };
-    if (buildScriptSource === 'repo')
-      buildScript.repoPath = buildScriptRepoPath;
-
-    // Test script configuration (optional)
-    let testScript: ScriptConfig | undefined;
-    if (hasTestScript) {
-      testScript = { source: testScriptSource };
-      if (testScriptSource === 'repo')
-        testScript.repoPath = testScriptRepoPath;
-    }
 
     // Default config schema and values for the configuration
     const configSchema: ConfigSchema = {
@@ -67,14 +42,14 @@ export function CreateProject() {
       runTests: true,
     };
 
-    // Create a default configuration - server will assign the ID
+    // Create a default configuration - the build/test/fetch scripts and
+    // automation settings are filled in from the project page after creation.
     const now = new Date().toISOString();
     const defaultConfiguration: BuildConfiguration = {
       id: '', // Server will assign
       name: 'Default',
       description: 'Default build configuration',
-      buildScript,
-      testScript,
+      buildScript: { source: 'local' },
       configSchema,
       defaultConfig: defaultConfigValues,
       createdAt: now,
@@ -88,8 +63,8 @@ export function CreateProject() {
       gitUrl,
       gitBranch,
       configurations: [defaultConfiguration],
-      autoBuild,
-      pollInterval,
+      autoBuild: false,
+      pollInterval: 300,
     };
 
     try {
@@ -153,9 +128,12 @@ export function CreateProject() {
               value={gitUrl}
               onChange={(e) => setGitUrl(e.target.value)}
               required
-              placeholder="https://github.com/user/repo.git"
+              placeholder="https://github.com/user/repo.git or D:/repos/my-project"
               className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-sm"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              A git URL (https / ssh / git) or a local file-system path to a repository.
+            </p>
           </div>
 
           <div>
@@ -170,169 +148,10 @@ export function CreateProject() {
           </div>
         </div>
 
-        {/* Build Script */}
-        <div className="bg-gray-800 rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-medium text-gray-200 mb-4">Build Script (Bash)</h2>
-          <p className="text-sm text-gray-500 -mt-2 mb-4">
-            Build scripts are always executed via bash (Git Bash on Windows).
-          </p>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Script Location</label>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  value="local"
-                  checked={buildScriptSource === 'local'}
-                  onChange={() => setBuildScriptSource('local')}
-                  className="text-blue-500"
-                />
-                <span className="text-gray-300">CI Server</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  value="repo"
-                  checked={buildScriptSource === 'repo'}
-                  onChange={() => setBuildScriptSource('repo')}
-                  className="text-blue-500"
-                />
-                <span className="text-gray-300">Repository</span>
-              </label>
-            </div>
-          </div>
-
-          {buildScriptSource === 'repo' && (
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">Script Path in Repository</label>
-              <input
-                type="text"
-                value={buildScriptRepoPath}
-                onChange={(e) => setBuildScriptRepoPath(e.target.value)}
-                placeholder=".ci/build.sh"
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-sm"
-              />
-              <p className="text-sm text-gray-500 mt-2">
-                The script will be read from the cloned repository during each build.
-              </p>
-            </div>
-          )}
-
-          {buildScriptSource === 'local' && (
-            <div className="bg-gray-700/50 rounded p-4">
-              <p className="text-sm text-gray-300 mb-2">
-                After creating the project, you can edit the build script in the <strong>Scripts</strong> tab.
-              </p>
-              <p className="text-xs text-gray-500">
-                Stored at: <code className="text-gray-400">data/projects/{generateSlug(name) || '{slug}'}/build.sh</code>
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Test Script (Optional) */}
-        <div className="bg-gray-800 rounded-lg p-6 space-y-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-gray-200">Test Script (Optional)</h2>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={hasTestScript}
-                onChange={(e) => setHasTestScript(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
-              />
-              <span className="text-sm text-gray-400">Enable test script</span>
-            </label>
-          </div>
-
-          {hasTestScript && (
-            <>
-              <div>
-                <label className="block text-sm text-gray-400 mb-2">Script Location</label>
-                <div className="flex flex-wrap gap-4">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      value="local"
-                      checked={testScriptSource === 'local'}
-                      onChange={() => setTestScriptSource('local')}
-                      className="text-blue-500"
-                    />
-                    <span className="text-gray-300">CI Server</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      value="repo"
-                      checked={testScriptSource === 'repo'}
-                      onChange={() => setTestScriptSource('repo')}
-                      className="text-blue-500"
-                    />
-                    <span className="text-gray-300">Repository</span>
-                  </label>
-                </div>
-              </div>
-
-              {testScriptSource === 'repo' && (
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Script Path in Repository</label>
-                  <input
-                    type="text"
-                    value={testScriptRepoPath}
-                    onChange={(e) => setTestScriptRepoPath(e.target.value)}
-                    placeholder=".ci/test.sh"
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono text-sm"
-                  />
-                  <p className="text-sm text-gray-500 mt-2">
-                    The script will be read from the cloned repository during each build.
-                  </p>
-                </div>
-              )}
-
-              {testScriptSource === 'local' && (
-                <div className="bg-gray-700/50 rounded p-4">
-                  <p className="text-sm text-gray-300 mb-2">
-                    After creating the project, you can edit the test script in the <strong>Scripts</strong> tab.
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Stored at: <code className="text-gray-400">
-                      data/projects/{generateSlug(name) || '{slug}'}/test.sh
-                    </code>
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Automation */}
-        <div className="bg-gray-800 rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-medium text-gray-200 mb-4">Automation</h2>
-
-          <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={autoBuild}
-              onChange={(e) => setAutoBuild(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
-            />
-            <span className="text-gray-300">Enable automatic builds on git changes</span>
-          </label>
-
-          {autoBuild && (
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">Poll Interval (seconds)</label>
-              <input
-                type="number"
-                value={pollInterval}
-                onChange={(e) => setPollInterval(parseInt(e.target.value) || 300)}
-                min={60}
-                className="w-32 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          )}
-        </div>
+        <p className="text-sm text-gray-500">
+          Build, test and fetch scripts and automation settings can be configured from the
+          project page after it is created.
+        </p>
 
         {/* Actions */}
         <div className="flex justify-end gap-3">

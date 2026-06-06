@@ -40,6 +40,12 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
     setConfig({ ...defaultConfig });
   }, [defaultConfig]);
 
+  // Default the branch to the configuration's override (falling back to the
+  // project default) whenever the selected configuration changes.
+  useEffect(() => {
+    setGitBranch(selectedConfig?.gitBranch || project.gitBranch);
+  }, [selectedConfig, project.gitBranch]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 

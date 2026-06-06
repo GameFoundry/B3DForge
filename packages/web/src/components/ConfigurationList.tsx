@@ -13,6 +13,7 @@ import {
   useUpdateConfigurationFetchScript,
   useProjectFetchScript,
   useUpdateProjectFetchScript,
+  useUpdateProject,
 } from '../hooks/useProjects';
 import { ScriptEditor } from './ScriptEditor';
 
@@ -62,6 +63,8 @@ export function ConfigurationList({ project }: ConfigurationListProps) {
 
   return (
     <div className="space-y-6">
+      <ProjectRepositorySettings project={project} />
+
       <ProjectFetchScript projectSlug={project.slug} />
 
       <div className="flex items-center justify-between">
@@ -102,6 +105,7 @@ export function ConfigurationList({ project }: ConfigurationListProps) {
               key={config.id}
               configuration={config}
               projectSlug={project.slug}
+              projectDefaultBranch={project.gitBranch}
               isDefault={config.id === project.defaultConfigurationId}
               isExpanded={expandedConfigId === config.id}
               isEditing={editingConfigId === config.id}
@@ -264,6 +268,7 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
 interface ConfigurationItemProps {
   configuration: BuildConfiguration;
   projectSlug: string;
+  projectDefaultBranch: string;
   isDefault: boolean;
   isExpanded: boolean;
   isEditing: boolean;
@@ -280,6 +285,7 @@ interface ConfigurationItemProps {
 function ConfigurationItem({
   configuration,
   projectSlug,
+  projectDefaultBranch,
   isDefault,
   isExpanded,
   isEditing,
@@ -294,6 +300,7 @@ function ConfigurationItem({
   const [name, setName] = useState(configuration.name);
   const [description, setDescription] = useState(configuration.description ?? '');
   const [buildType, setBuildType] = useState(configuration.buildType ?? '');
+  const [gitBranch, setGitBranch] = useState(configuration.gitBranch ?? '');
   const [forceCleanBuild, setForceCleanBuild] = useState(configuration.forceCleanBuild ?? false);
   const [platform, setPlatform] = useState<'any' | 'win32' | 'linux' | 'darwin'>(
     (configuration.platform as 'any' | 'win32' | 'linux' | 'darwin') ?? 'any'
@@ -316,6 +323,7 @@ function ConfigurationItem({
       name,
       description: description || undefined,
       buildType: buildType || undefined,
+      gitBranch: gitBranch.trim(),
       forceCleanBuild,
       platform,
       requiredLabels: requiredLabels.length ? requiredLabels : [],
@@ -385,6 +393,14 @@ function ConfigurationItem({
               {configuration.forceCleanBuild && (
                 <span className="text-xs px-2 py-0.5 bg-orange-900/50 text-orange-300 rounded">
                   Clean builds
+                </span>
+              )}
+              {configuration.gitBranch && (
+                <span
+                  className="text-xs px-2 py-0.5 bg-gray-700 text-gray-300 rounded font-mono"
+                  title="Branch override"
+                >
+                  {configuration.gitBranch}
                 </span>
               )}
             </div>
@@ -469,6 +485,19 @@ function ConfigurationItem({
                 </datalist>
                 <p className="text-xs text-gray-500 mt-1">
                   Passed to build script as $BUILD_TYPE environment variable
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Branch override</label>
+                <input
+                  type="text"
+                  value={gitBranch}
+                  onChange={(e) => setGitBranch(e.target.value)}
+                  placeholder={`Default: ${projectDefaultBranch}`}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Leave empty to use the project default branch.
                 </p>
               </div>
               <label className="flex items-center gap-2">
@@ -598,6 +627,81 @@ function ConfigurationItem({
         </div>
       )}
     </div>
+  );
+}
+
+interface ProjectRepositorySettingsProps {
+  project: Project;
+}
+
+function ProjectRepositorySettings({ project }: ProjectRepositorySettingsProps) {
+  const updateProject = useUpdateProject();
+  const [gitUrl, setGitUrl] = useState(project.gitUrl);
+  const [gitBranch, setGitBranch] = useState(project.gitBranch);
+
+  // Reset the editable values whenever the project changes underneath us.
+  const [lastSynced, setLastSynced] = useState(`${project.gitUrl}\n${project.gitBranch}`);
+  const currentSynced = `${project.gitUrl}\n${project.gitBranch}`;
+  if (currentSynced !== lastSynced) {
+    setLastSynced(currentSynced);
+    setGitUrl(project.gitUrl);
+    setGitBranch(project.gitBranch);
+  }
+
+  const trimmedUrl = gitUrl.trim();
+  const trimmedBranch = gitBranch.trim();
+  const isDirty = trimmedUrl !== project.gitUrl || trimmedBranch !== project.gitBranch;
+  const canSave = !!trimmedUrl && !!trimmedBranch && isDirty;
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSave) return;
+    updateProject.mutate({
+      slug: project.slug,
+      input: { gitUrl: trimmedUrl, gitBranch: trimmedBranch },
+    });
+  };
+
+  return (
+    <form onSubmit={handleSave} className="bg-gray-800 rounded-lg p-4 space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-100">Repository</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          The URL may be a git URL (https / ssh / git) or a local file-system path. Exposed to
+          the fetch script as <code className="text-gray-300">$GIT_URL</code> and{' '}
+          <code className="text-gray-300">$GIT_BRANCH</code>.
+        </p>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-400 mb-1">URL</label>
+        <input
+          type="text"
+          value={gitUrl}
+          onChange={(e) => setGitUrl(e.target.value)}
+          placeholder="https://github.com/user/repo.git or D:/repos/my-project"
+          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 font-mono text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-400 mb-1">Default Branch</label>
+        <input
+          type="text"
+          value={gitBranch}
+          onChange={(e) => setGitBranch(e.target.value)}
+          placeholder="master"
+          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 font-mono text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={!canSave || updateProject.isPending}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50"
+        >
+          {updateProject.isPending ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </form>
   );
 }
 

@@ -200,7 +200,7 @@ export class GitPollingService {
         try {
           const build = await this.buildRepo.create(slug, {
             configurationId: config.id,
-            gitBranch: project.gitBranch,
+            gitBranch: config.gitBranch || project.gitBranch,
             config: config.defaultConfig ?? {},
             triggeredBy: 'git-polling',
           }, 'auto', config.name);

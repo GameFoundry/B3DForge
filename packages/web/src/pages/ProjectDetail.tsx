@@ -143,7 +143,7 @@ export function ProjectDetail() {
                 : 'border-transparent text-gray-400 hover:text-gray-300'
             }`}
           >
-            Configurations
+            Configuration
           </button>
           <button
             onClick={() => setActiveTab('automation')}

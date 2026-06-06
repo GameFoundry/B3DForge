@@ -393,10 +393,11 @@ function RepoForm({ initialValues, onSubmit, onCancel }: RepoFormProps) {
             type="text"
             value={gitUrl}
             onChange={e => setGitUrl(e.target.value)}
-            placeholder="https://github.com/user/repo.git"
+            placeholder="https://github.com/user/repo.git or D:/repos/my-project"
             className="w-full px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm text-gray-200"
             required
           />
+          <p className="text-xs text-gray-500 mt-1">URL or local file-system path</p>
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-400 mb-1">Branch</label>

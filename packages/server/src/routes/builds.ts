@@ -69,7 +69,7 @@ export function createBuildRoutes(
       const build = await buildRepo.create(req.params.slug, {
         ...input,
         configurationId: configurationId ?? '',
-        gitBranch: input.gitBranch ?? project.gitBranch,
+        gitBranch: input.gitBranch || configuration?.gitBranch || project.gitBranch,
         config: input.config ?? defaultConfig,
       }, 'manual', configurationName);
 

@@ -81,6 +81,11 @@ export interface BuildConfiguration {
 
   // Build settings
   buildType?: string;                // e.g., "Debug", "Release", "RelWithDebInfo"
+  /**
+   * Optional git branch override for this configuration. When unset, builds use
+   * the project-level `gitBranch`.
+   */
+  gitBranch?: string;
 
   // Per-build options (shown in trigger modal)
   configSchema?: ConfigSchema;       // Custom options for this config
