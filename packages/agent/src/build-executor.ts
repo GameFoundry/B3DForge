@@ -35,17 +35,35 @@ export interface ExecutorConfig {
 	defaultTimeoutMs: number;
 	/** How often to flush the log buffer to listeners. */
 	logBufferIntervalMs: number;
+	/**
+	 * Maximum serialized size (bytes) of a single emitted log batch. Batches are
+	 * split so that no single `agent:log` Socket.IO message approaches the
+	 * transport's `maxHttpBufferSize` (1 MB by default) — exceeding that limit
+	 * makes the server drop the agent connection mid-build.
+	 */
+	maxLogBatchBytes: number;
+	/** Maximum size (bytes) of a single log line's message before it is truncated. */
+	maxLogLineBytes: number;
 	/** Optional explicit path to bash. On Windows defaults to Git Bash; on POSIX defaults to `bash`. */
 	bashPath?: string;
 }
 
 const IS_WINDOWS = process.platform === 'win32';
 
+/**
+ * Approximate serialized overhead (bytes) of a `LogLine`'s non-message fields
+ * (timestamp, level, phase, lineNumber, JSON punctuation). Added to each line's
+ * message length when sizing a batch so the estimate stays conservative.
+ */
+const LOG_LINE_OVERHEAD_BYTES = 256;
+
 const DEFAULT_CONFIG: ExecutorConfig = {
 	workspaceRoot: '',
 	scriptsRoot: '',
 	defaultTimeoutMs: 60 * 60 * 1000,
 	logBufferIntervalMs: 100,
+	maxLogBatchBytes: 512 * 1024,
+	maxLogLineBytes: 128 * 1024,
 	bashPath: IS_WINDOWS ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash',
 };
 
@@ -464,11 +482,60 @@ export class BuildExecutor extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Flush buffered log lines to listeners in size-bounded batches. A single
+	 * `agent:log` Socket.IO message must stay well under the transport's
+	 * `maxHttpBufferSize` (1 MB by default); a larger message causes the server
+	 * to drop the agent connection, which surfaces as a spurious "Agent
+	 * disconnected mid-build". Oversized individual lines are truncated first so
+	 * one runaway line can't exceed the limit on its own.
+	 */
 	private flushLogBuffer(): void {
-		if (this.logBuffer.length > 0) {
-			this.emit('log', [...this.logBuffer]);
-			this.logBuffer = [];
+		if (this.logBuffer.length === 0) return;
+
+		const pending = this.logBuffer;
+		this.logBuffer = [];
+
+		const maxBatchBytes = this.config.maxLogBatchBytes;
+		let batch: LogLine[] = [];
+		let batchBytes = 0;
+
+		for (const line of pending) {
+			const safeLine = this.clampLogLine(line);
+			const lineBytes = Buffer.byteLength(safeLine.message, 'utf8') + LOG_LINE_OVERHEAD_BYTES;
+
+			// Emit the accumulated batch before it would exceed the cap. A single
+			// (already clamped) line always fits in a batch on its own.
+			if (batch.length > 0 && batchBytes + lineBytes > maxBatchBytes) {
+				this.emit('log', batch);
+				batch = [];
+				batchBytes = 0;
+			}
+
+			batch.push(safeLine);
+			batchBytes += lineBytes;
 		}
+
+		if (batch.length > 0)
+			this.emit('log', batch);
+	}
+
+	/**
+	 * Truncate a log line whose message exceeds `maxLogLineBytes`, so a single
+	 * runaway line (e.g. a multi-megabyte blob printed without newlines) can't by
+	 * itself exceed the transport message-size limit.
+	 */
+	private clampLogLine(line: LogLine): LogLine {
+		const max = this.config.maxLogLineBytes;
+		const buf = Buffer.from(line.message, 'utf8');
+		if (buf.length <= max) return line;
+
+		const kept = buf.subarray(0, max).toString('utf8');
+		const omitted = buf.length - max;
+		return {
+			...line,
+			message: `${kept} …[truncated ${omitted} more bytes]`,
+		};
 	}
 
 	private startPhase(name: string): void {

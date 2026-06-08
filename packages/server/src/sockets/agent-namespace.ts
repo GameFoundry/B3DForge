@@ -107,8 +107,9 @@ export function setupAgentNamespace(
 			})().catch(err => console.error('Failed to handle agent:error:', err));
 		});
 
-		socket.on('disconnect', () => {
-			console.log(`Agent socket disconnected: ${socket.id}`);
+		socket.on('disconnect', (reason: string) => {
+			const who = registered ? `${socket.id} (agent ${registered.info.id})` : socket.id;
+			console.log(`Agent socket disconnected: ${who} — reason: ${reason}`);
 			if (registered) {
 				const removed = registry.unregister(registered.info.id);
 				if (removed) io.emit('agent:disconnected', removed.info);

@@ -50,7 +50,13 @@ async function main(): Promise<void> {
 	});
 
 	client.on('disconnect', (reason) => {
-		console.warn(`Disconnected from orchestrator: ${reason}`);
+		const active = Array.from(activeExecutors.keys());
+		const context = active.length ? ` (active builds: ${active.join(', ')})` : '';
+		console.warn(`Disconnected from orchestrator: ${reason}${context}`);
+	});
+
+	client.on('connect_error', (err) => {
+		console.error(`Orchestrator connection error: ${err.message}`);
 	});
 
 	client.on('build:assign', (assignment) => {
