@@ -1,28 +1,24 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import type { ReferenceInfo, ReferenceManifest } from '@banshee-forge/shared';
+import { DEFAULT_SNAPSHOT_CATEGORY } from '@banshee-forge/shared';
 import { JsonFileStorage } from '../storage/json-file.js';
-
-export interface ReferenceInfo {
-	testName: string;
-	path: string;
-	updatedAt: string;
-	buildId: string;
-	configurationId: string;
-}
-
-export interface ReferenceManifest {
-	references: Record<string, ReferenceInfo>;
-}
 
 /**
  * Repository for managing reference (baseline) images for snapshot comparison.
  *
  * Storage structure:
  * data/references/{projectSlug}/{configurationId}/
- * ├── manifest.json       # { testName: { path, updatedAt, buildId } }
- * ├── ExampleLighting.png
- * ├── ExamplePhysics.png
- * └── ...
+ * ├── manifest.json       # { "{category}/{testName}": ReferenceInfo }
+ * ├── Vulkan/
+ * │   ├── Lighting.png
+ * │   └── ...
+ * └── D3D12/
+ *     └── ...
+ *
+ * Manifests written before categories existed are keyed by bare testName with images
+ * stored flat; getManifest() lazily migrates them to the categorized layout under
+ * DEFAULT_SNAPSHOT_CATEGORY.
  */
 export class ReferenceRepository {
 	constructor(
@@ -34,18 +30,76 @@ export class ReferenceRepository {
 		return `references/${projectSlug}/${configurationId}/manifest.json`;
 	}
 
-	private imagePath(projectSlug: string, configurationId: string, testName: string): string {
-		return `references/${projectSlug}/${configurationId}/${testName}.png`;
+	private imagePath(projectSlug: string, configurationId: string, category: string, testName: string): string {
+		return `references/${projectSlug}/${configurationId}/${category}/${testName}.png`;
+	}
+
+	private manifestKey(category: string, testName: string): string {
+		return `${category}/${testName}`;
 	}
 
 	/**
-	 * Get the manifest for a project/configuration
+	 * Get the manifest for a project/configuration, migrating legacy (pre-category)
+	 * manifests to the categorized layout on first access.
 	 */
 	async getManifest(projectSlug: string, configurationId: string): Promise<ReferenceManifest> {
-		return this.storage.read<ReferenceManifest>(
+		const manifest = await this.storage.read<ReferenceManifest>(
 			this.manifestPath(projectSlug, configurationId),
 			{ references: {} }
 		);
+
+		const hasLegacyKeys = Object.keys(manifest.references).some(key => !key.includes('/'));
+		if (!hasLegacyKeys) return manifest;
+
+		return this.migrateLegacyManifest(projectSlug, configurationId, manifest);
+	}
+
+	/**
+	 * Move flat-layout reference images into the default category directory and rewrite
+	 * manifest entries under "{category}/{testName}" keys.
+	 */
+	private async migrateLegacyManifest(
+		projectSlug: string,
+		configurationId: string,
+		manifest: ReferenceManifest
+	): Promise<ReferenceManifest> {
+		const migrated: ReferenceManifest = { references: {} };
+
+		for (const [key, info] of Object.entries(manifest.references)) {
+			if (key.includes('/')) {
+				migrated.references[key] = info;
+				continue;
+			}
+
+			const testName = info.testName || key;
+			const category = DEFAULT_SNAPSHOT_CATEGORY;
+
+			const oldImagePath = path.join(
+				this.basePath,
+				`references/${projectSlug}/${configurationId}/${testName}.png`
+			);
+			const newImagePath = path.join(
+				this.basePath,
+				this.imagePath(projectSlug, configurationId, category, testName)
+			);
+
+			try {
+				await fs.mkdir(path.dirname(newImagePath), { recursive: true });
+				await fs.rename(oldImagePath, newImagePath);
+			} catch {
+				// Image already moved or never existed; keep the manifest entry either way
+			}
+
+			migrated.references[this.manifestKey(category, testName)] = {
+				...info,
+				testName,
+				category,
+				path: `${category}/${testName}.png`,
+			};
+		}
+
+		await this.storage.write(this.manifestPath(projectSlug, configurationId), migrated);
+		return migrated;
 	}
 
 	/**
@@ -54,24 +108,37 @@ export class ReferenceRepository {
 	async getReferenceInfo(
 		projectSlug: string,
 		configurationId: string,
+		category: string,
 		testName: string
 	): Promise<ReferenceInfo | null> {
 		const manifest = await this.getManifest(projectSlug, configurationId);
-		return manifest.references[testName] ?? null;
+		return manifest.references[this.manifestKey(category, testName)] ?? null;
 	}
 
 	/**
-	 * Check if a reference exists for a test
+	 * Check if a reference exists for a test. Reads the manifest first so legacy
+	 * layouts are migrated before the image file is checked.
 	 */
-	async hasReference(projectSlug: string, configurationId: string, testName: string): Promise<boolean> {
-		return this.storage.exists(this.imagePath(projectSlug, configurationId, testName));
+	async hasReference(
+		projectSlug: string,
+		configurationId: string,
+		category: string,
+		testName: string
+	): Promise<boolean> {
+		await this.getManifest(projectSlug, configurationId);
+		return this.storage.exists(this.imagePath(projectSlug, configurationId, category, testName));
 	}
 
 	/**
 	 * Get the full filesystem path to a reference image
 	 */
-	getReferenceImagePath(projectSlug: string, configurationId: string, testName: string): string {
-		return path.join(this.basePath, this.imagePath(projectSlug, configurationId, testName));
+	getReferenceImagePath(
+		projectSlug: string,
+		configurationId: string,
+		category: string,
+		testName: string
+	): string {
+		return path.join(this.basePath, this.imagePath(projectSlug, configurationId, category, testName));
 	}
 
 	/**
@@ -80,25 +147,28 @@ export class ReferenceRepository {
 	async setReference(
 		projectSlug: string,
 		configurationId: string,
+		category: string,
 		testName: string,
 		screenshotPath: string,
 		buildId: string
 	): Promise<ReferenceInfo> {
+		// Read (and if needed migrate) the manifest before writing the new image
+		const manifest = await this.getManifest(projectSlug, configurationId);
+
 		// Copy the screenshot to reference storage
-		const destPath = path.join(this.basePath, this.imagePath(projectSlug, configurationId, testName));
+		const destPath = path.join(this.basePath, this.imagePath(projectSlug, configurationId, category, testName));
 		await fs.mkdir(path.dirname(destPath), { recursive: true });
 		await fs.copyFile(screenshotPath, destPath);
 
-		// Update manifest
-		const manifest = await this.getManifest(projectSlug, configurationId);
 		const info: ReferenceInfo = {
 			testName,
-			path: `${testName}.png`,
+			category,
+			path: `${category}/${testName}.png`,
 			updatedAt: new Date().toISOString(),
 			buildId,
 			configurationId,
 		};
-		manifest.references[testName] = info;
+		manifest.references[this.manifestKey(category, testName)] = info;
 		await this.storage.write(this.manifestPath(projectSlug, configurationId), manifest);
 
 		return info;
@@ -107,17 +177,22 @@ export class ReferenceRepository {
 	/**
 	 * Delete a reference image
 	 */
-	async deleteReference(projectSlug: string, configurationId: string, testName: string): Promise<boolean> {
-		// Check if reference exists
-		const exists = await this.hasReference(projectSlug, configurationId, testName);
+	async deleteReference(
+		projectSlug: string,
+		configurationId: string,
+		category: string,
+		testName: string
+	): Promise<boolean> {
+		// Check if reference exists (also migrates legacy layouts)
+		const exists = await this.hasReference(projectSlug, configurationId, category, testName);
 		if (!exists) return false;
 
 		// Delete the image file
-		await this.storage.delete(this.imagePath(projectSlug, configurationId, testName));
+		await this.storage.delete(this.imagePath(projectSlug, configurationId, category, testName));
 
 		// Update manifest
 		const manifest = await this.getManifest(projectSlug, configurationId);
-		delete manifest.references[testName];
+		delete manifest.references[this.manifestKey(category, testName)];
 		await this.storage.write(this.manifestPath(projectSlug, configurationId), manifest);
 
 		return true;
@@ -166,29 +241,82 @@ export class ReferenceRepository {
 		destConfigId: string
 	): Promise<number> {
 		const sourceManifest = await this.getManifest(projectSlug, sourceConfigId);
+		const destManifest = await this.getManifest(projectSlug, destConfigId);
 		let count = 0;
 
-		for (const [testName, info] of Object.entries(sourceManifest.references)) {
-			const sourcePath = this.getReferenceImagePath(projectSlug, sourceConfigId, testName);
-			const destPath = path.join(this.basePath, this.imagePath(projectSlug, destConfigId, testName));
+		for (const [key, info] of Object.entries(sourceManifest.references)) {
+			const sourcePath = this.getReferenceImagePath(projectSlug, sourceConfigId, info.category, info.testName);
+			const destPath = path.join(
+				this.basePath,
+				this.imagePath(projectSlug, destConfigId, info.category, info.testName)
+			);
 
 			try {
 				await fs.mkdir(path.dirname(destPath), { recursive: true });
 				await fs.copyFile(sourcePath, destPath);
 
-				// Update dest manifest
-				const destManifest = await this.getManifest(projectSlug, destConfigId);
-				destManifest.references[testName] = {
+				destManifest.references[key] = {
 					...info,
 					configurationId: destConfigId,
 					updatedAt: new Date().toISOString(),
 				};
-				await this.storage.write(this.manifestPath(projectSlug, destConfigId), destManifest);
 
 				count++;
 			} catch {
 				// Skip failed copies
 			}
+		}
+
+		if (count > 0) {
+			await this.storage.write(this.manifestPath(projectSlug, destConfigId), destManifest);
+		}
+
+		return count;
+	}
+
+	/**
+	 * Copy all references from one category to another within the same configuration.
+	 * Used to seed a new category's baselines (e.g. D3D12 from Vulkan).
+	 */
+	async copyCategoryReferences(
+		projectSlug: string,
+		configurationId: string,
+		sourceCategory: string,
+		destCategory: string
+	): Promise<number> {
+		const manifest = await this.getManifest(projectSlug, configurationId);
+		let count = 0;
+
+		const sourceEntries = Object.values(manifest.references).filter(
+			info => info.category === sourceCategory
+		);
+
+		for (const info of sourceEntries) {
+			const sourcePath = this.getReferenceImagePath(projectSlug, configurationId, sourceCategory, info.testName);
+			const destPath = path.join(
+				this.basePath,
+				this.imagePath(projectSlug, configurationId, destCategory, info.testName)
+			);
+
+			try {
+				await fs.mkdir(path.dirname(destPath), { recursive: true });
+				await fs.copyFile(sourcePath, destPath);
+
+				manifest.references[this.manifestKey(destCategory, info.testName)] = {
+					...info,
+					category: destCategory,
+					path: `${destCategory}/${info.testName}.png`,
+					updatedAt: new Date().toISOString(),
+				};
+
+				count++;
+			} catch {
+				// Skip failed copies
+			}
+		}
+
+		if (count > 0) {
+			await this.storage.write(this.manifestPath(projectSlug, configurationId), manifest);
 		}
 
 		return count;

@@ -1,4 +1,5 @@
 import type { BuildTestResults, UnitTestOutput, AggregatedSnapshotResult, TestSuite } from '@banshee-forge/shared';
+import { DEFAULT_SNAPSHOT_CATEGORY } from '@banshee-forge/shared';
 import { JsonFileStorage } from '../storage/json-file.js';
 import path from 'path';
 
@@ -11,11 +12,16 @@ import path from 'path';
  * ├── unit/
  * │   └── raw-output.json   # Original UnitTestRunner output
  * └── snapshots/
- *     ├── {testName}/
- *     │   ├── result.json   # SnapshotTestResult
- *     │   ├── screenshot.png
- *     │   └── log.txt
+ *     ├── {category}/
+ *     │   ├── {testName}/
+ *     │   │   ├── result.json   # SnapshotTestResult
+ *     │   │   ├── screenshot.png
+ *     │   │   └── log.txt
+ *     │   └── ...
  *     └── ...
+ *
+ * Builds stored before categories existed use a flat snapshots/{testName}/ layout;
+ * reads fall back to it when the requested category is DEFAULT_SNAPSHOT_CATEGORY.
  */
 export class TestResultsRepository {
 	constructor(private storage: JsonFileStorage) {}
@@ -32,8 +38,65 @@ export class TestResultsRepository {
 		return `${this.basePath(projectSlug, buildId)}/unit/raw-output.json`;
 	}
 
-	private snapshotPath(projectSlug: string, buildId: string, testName: string): string {
+	private snapshotPath(projectSlug: string, buildId: string, category: string, testName: string): string {
+		return `${this.basePath(projectSlug, buildId)}/snapshots/${category}/${testName}`;
+	}
+
+	private legacySnapshotPath(projectSlug: string, buildId: string, testName: string): string {
 		return `${this.basePath(projectSlug, buildId)}/snapshots/${testName}`;
+	}
+
+	/**
+	 * Resolve the storage-relative directory holding a snapshot test's files, falling
+	 * back to the legacy flat layout (no category level) for builds stored before
+	 * categories existed. Returns null if the test exists in neither location.
+	 */
+	async resolveSnapshotDir(
+		projectSlug: string,
+		buildId: string,
+		category: string,
+		testName: string
+	): Promise<string | null> {
+		const categorized = this.snapshotPath(projectSlug, buildId, category, testName);
+		if (await this.storage.exists(`${categorized}/result.json`)) return categorized;
+
+		if (category === DEFAULT_SNAPSHOT_CATEGORY) {
+			const legacy = this.legacySnapshotPath(projectSlug, buildId, testName);
+			if (await this.storage.exists(`${legacy}/result.json`)) return legacy;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Resolve the absolute filesystem path of a snapshot file (screenshot.png, diff.png,
+	 * log.txt, ...), honoring the legacy layout. Returns null if the test dir doesn't exist.
+	 */
+	async resolveSnapshotFilePath(
+		projectSlug: string,
+		buildId: string,
+		category: string,
+		testName: string,
+		fileName: string
+	): Promise<string | null> {
+		const dir = await this.resolveSnapshotDir(projectSlug, buildId, category, testName);
+		if (!dir) return null;
+		return path.join(this.storage.getBasePath(), dir, fileName);
+	}
+
+	/**
+	 * Absolute directory snapshot files are written to during parsing (always the
+	 * categorized layout).
+	 */
+	getSnapshotAbsoluteDir(projectSlug: string, buildId: string, category: string, testName: string): string {
+		return path.join(this.storage.getBasePath(), this.snapshotPath(projectSlug, buildId, category, testName));
+	}
+
+	/**
+	 * Absolute directory unit test files are written to during parsing.
+	 */
+	getUnitTestAbsoluteDir(projectSlug: string, buildId: string): string {
+		return path.join(this.storage.getBasePath(), this.basePath(projectSlug, buildId), 'unit');
 	}
 
 	/**
@@ -83,10 +146,11 @@ export class TestResultsRepository {
 	async saveSnapshotResult(
 		projectSlug: string,
 		buildId: string,
+		category: string,
 		testName: string,
 		result: AggregatedSnapshotResult
 	): Promise<void> {
-		const resultPath = `${this.snapshotPath(projectSlug, buildId, testName)}/result.json`;
+		const resultPath = `${this.snapshotPath(projectSlug, buildId, category, testName)}/result.json`;
 		await this.storage.write(resultPath, result);
 	}
 
@@ -96,12 +160,12 @@ export class TestResultsRepository {
 	async getSnapshotResult(
 		projectSlug: string,
 		buildId: string,
+		category: string,
 		testName: string
 	): Promise<AggregatedSnapshotResult | null> {
-		const resultPath = `${this.snapshotPath(projectSlug, buildId, testName)}/result.json`;
-		const exists = await this.storage.exists(resultPath);
-		if (!exists) return null;
-		return this.storage.read<AggregatedSnapshotResult>(resultPath, null as any);
+		const dir = await this.resolveSnapshotDir(projectSlug, buildId, category, testName);
+		if (!dir) return null;
+		return this.storage.read<AggregatedSnapshotResult>(`${dir}/result.json`, null as any);
 	}
 
 	/**
@@ -113,32 +177,17 @@ export class TestResultsRepository {
 	}
 
 	/**
-	 * Get the filesystem path to a snapshot screenshot
-	 */
-	getScreenshotFilePath(projectSlug: string, buildId: string, testName: string): string {
-		return path.join(this.basePath(projectSlug, buildId), 'snapshots', testName, 'screenshot.png');
-	}
-
-	/**
-	 * Get the filesystem path to a snapshot diff image
-	 */
-	getDiffFilePath(projectSlug: string, buildId: string, testName: string): string {
-		return path.join(this.basePath(projectSlug, buildId), 'snapshots', testName, 'diff.png');
-	}
-
-	/**
-	 * Get the filesystem path to a snapshot log file
-	 */
-	getLogFilePath(projectSlug: string, buildId: string, testName: string): string {
-		return path.join(this.basePath(projectSlug, buildId), 'snapshots', testName, 'log.txt');
-	}
-
-	/**
 	 * Get snapshot log content
 	 */
-	async getSnapshotLog(projectSlug: string, buildId: string, testName: string): Promise<string | null> {
-		const logPath = `${this.snapshotPath(projectSlug, buildId, testName)}/log.txt`;
-		return this.storage.readText(logPath);
+	async getSnapshotLog(
+		projectSlug: string,
+		buildId: string,
+		category: string,
+		testName: string
+	): Promise<string | null> {
+		const dir = await this.resolveSnapshotDir(projectSlug, buildId, category, testName);
+		if (!dir) return null;
+		return this.storage.readText(`${dir}/log.txt`);
 	}
 
 	/**

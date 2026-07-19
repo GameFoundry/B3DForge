@@ -92,6 +92,13 @@ export interface AgentCompleteEvent {
 	status: 'success' | 'failed';
 	exitCode: number;
 	repositoryCommits: RepositoryCommitInfo[];
+	/**
+	 * Ordered snapshot categories declared by `::snapshot-category::` markers in the
+	 * test script output, in emission order. Empty if the script declared none (e.g.
+	 * a build with no snapshot tests, or a legacy script). Consumed by the server when
+	 * parsing the snapshot results tree.
+	 */
+	snapshotCategories: string[];
 }
 
 /** Payload of `agent:error` event. */

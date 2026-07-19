@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import path from 'path';
 import { promises as fs } from 'fs';
 import { ReferenceRepository } from '../repositories/reference-repository.js';
 import { TestResultsRepository } from '../repositories/test-results-repository.js';
@@ -12,7 +11,6 @@ export function createReferenceRoutes(
 	testResultsRepository: TestResultsRepository,
 	projectRepo: ProjectRepository,
 	buildRepo: BuildRepository,
-	dataPath: string,
 	auditLog?: AuditLog
 ): Router {
 	const router = Router();
@@ -53,106 +51,6 @@ export function createReferenceRoutes(
 		}
 	});
 
-	// GET /api/v1/projects/:slug/references/:configId/:testName - Get reference image
-	router.get('/projects/:slug/references/:configId/:testName', async (req, res, next) => {
-		try {
-			const { slug, configId, testName } = req.params;
-
-			const hasReference = await referenceRepository.hasReference(slug, configId, testName);
-			if (!hasReference) {
-				res.status(404).json({ error: 'Not found', message: 'Reference image not found' });
-				return;
-			}
-
-			const imagePath = referenceRepository.getReferenceImagePath(slug, configId, testName);
-			res.sendFile(imagePath);
-		} catch (error) {
-			next(error);
-		}
-	});
-
-	// GET /api/v1/projects/:slug/references/:configId/:testName/info - Get reference info
-	router.get('/projects/:slug/references/:configId/:testName/info', async (req, res, next) => {
-		try {
-			const { slug, configId, testName } = req.params;
-
-			const info = await referenceRepository.getReferenceInfo(slug, configId, testName);
-			if (!info) {
-				res.status(404).json({ error: 'Not found', message: 'Reference not found' });
-				return;
-			}
-
-			res.json(info);
-		} catch (error) {
-			next(error);
-		}
-	});
-
-	// PUT /api/v1/projects/:slug/references/:configId/:testName - Set reference from build screenshot
-	router.put('/projects/:slug/references/:configId/:testName', async (req, res, next) => {
-		try {
-			const { slug, configId, testName } = req.params;
-			const { buildId } = req.body;
-
-			if (!buildId) {
-				res.status(400).json({ error: 'Bad request', message: 'buildId is required' });
-				return;
-			}
-
-			const project = await projectRepo.findBySlug(slug);
-			if (!project) {
-				res.status(404).json({ error: 'Not found', message: 'Project not found' });
-				return;
-			}
-
-			// Verify build exists
-			const build = await buildRepo.findById(slug, buildId);
-			if (!build) {
-				res.status(404).json({ error: 'Not found', message: 'Build not found' });
-				return;
-			}
-
-			// Get screenshot path
-			const screenshotPath = path.join(
-				dataPath,
-				testResultsRepository.getScreenshotFilePath(slug, buildId, testName)
-			);
-
-			// Verify screenshot exists
-			try {
-				await fs.access(screenshotPath);
-			} catch {
-				res.status(404).json({ error: 'Not found', message: 'Screenshot not found for this test' });
-				return;
-			}
-
-			// Set as reference
-			const info = await referenceRepository.setReference(slug, configId, testName, screenshotPath, buildId);
-			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.set', target: `${slug}/${configId}/${testName}`, details: { buildId } });
-			res.json(info);
-		} catch (error) {
-			next(error);
-		}
-	});
-
-	// DELETE /api/v1/projects/:slug/references/:configId/:testName - Delete reference
-	router.delete('/projects/:slug/references/:configId/:testName', async (req, res, next) => {
-		try {
-			const { slug, configId, testName } = req.params;
-
-			const deleted = await referenceRepository.deleteReference(slug, configId, testName);
-			if (!deleted) {
-				res.status(404).json({ error: 'Not found', message: 'Reference not found' });
-				return;
-			}
-
-			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.delete', target: `${slug}/${configId}/${testName}` });
-			res.json({ success: true });
-		} catch (error) {
-			next(error);
-		}
-	});
-
 	// POST /api/v1/projects/:slug/references/:configId/copy - Copy references from another config
 	router.post('/projects/:slug/references/:configId/copy', async (req, res, next) => {
 		try {
@@ -173,6 +71,139 @@ export function createReferenceRoutes(
 			const count = await referenceRepository.copyReferences(slug, sourceConfigId, configId);
 			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.copy', target: `${slug}/${configId}`, details: { sourceConfigId, copiedCount: count } });
 			res.json({ success: true, copiedCount: count });
+		} catch (error) {
+			next(error);
+		}
+	});
+
+	// POST /api/v1/projects/:slug/references/:configId/copy-category - Copy references between
+	// categories within the same config (e.g. seed D3D12 baselines from Vulkan)
+	router.post('/projects/:slug/references/:configId/copy-category', async (req, res, next) => {
+		try {
+			const { slug, configId } = req.params;
+			const { sourceCategory, destCategory } = req.body;
+
+			if (!sourceCategory || !destCategory) {
+				res.status(400).json({ error: 'Bad request', message: 'sourceCategory and destCategory are required' });
+				return;
+			}
+			if (sourceCategory === destCategory) {
+				res.status(400).json({ error: 'Bad request', message: 'sourceCategory and destCategory must differ' });
+				return;
+			}
+
+			const project = await projectRepo.findBySlug(slug);
+			if (!project) {
+				res.status(404).json({ error: 'Not found', message: 'Project not found' });
+				return;
+			}
+
+			const count = await referenceRepository.copyCategoryReferences(slug, configId, sourceCategory, destCategory);
+			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.copy-category', target: `${slug}/${configId}`, details: { sourceCategory, destCategory, copiedCount: count } });
+			res.json({ success: true, copiedCount: count });
+		} catch (error) {
+			next(error);
+		}
+	});
+
+	// GET /api/v1/projects/:slug/references/:configId/:category/:testName - Get reference image
+	router.get('/projects/:slug/references/:configId/:category/:testName', async (req, res, next) => {
+		try {
+			const { slug, configId, category, testName } = req.params;
+
+			const hasReference = await referenceRepository.hasReference(slug, configId, category, testName);
+			if (!hasReference) {
+				res.status(404).json({ error: 'Not found', message: 'Reference image not found' });
+				return;
+			}
+
+			const imagePath = referenceRepository.getReferenceImagePath(slug, configId, category, testName);
+			res.sendFile(imagePath);
+		} catch (error) {
+			next(error);
+		}
+	});
+
+	// GET /api/v1/projects/:slug/references/:configId/:category/:testName/info - Get reference info
+	router.get('/projects/:slug/references/:configId/:category/:testName/info', async (req, res, next) => {
+		try {
+			const { slug, configId, category, testName } = req.params;
+
+			const info = await referenceRepository.getReferenceInfo(slug, configId, category, testName);
+			if (!info) {
+				res.status(404).json({ error: 'Not found', message: 'Reference not found' });
+				return;
+			}
+
+			res.json(info);
+		} catch (error) {
+			next(error);
+		}
+	});
+
+	// PUT /api/v1/projects/:slug/references/:configId/:category/:testName - Set reference from build screenshot
+	router.put('/projects/:slug/references/:configId/:category/:testName', async (req, res, next) => {
+		try {
+			const { slug, configId, category, testName } = req.params;
+			const { buildId } = req.body;
+
+			if (!buildId) {
+				res.status(400).json({ error: 'Bad request', message: 'buildId is required' });
+				return;
+			}
+
+			const project = await projectRepo.findBySlug(slug);
+			if (!project) {
+				res.status(404).json({ error: 'Not found', message: 'Project not found' });
+				return;
+			}
+
+			// Verify build exists
+			const build = await buildRepo.findById(slug, buildId);
+			if (!build) {
+				res.status(404).json({ error: 'Not found', message: 'Build not found' });
+				return;
+			}
+
+			// Get screenshot path (handles legacy flat-layout builds)
+			const screenshotPath = await testResultsRepository.resolveSnapshotFilePath(
+				slug, buildId, category, testName, 'screenshot.png'
+			);
+			if (!screenshotPath) {
+				res.status(404).json({ error: 'Not found', message: 'Snapshot test not found for this build' });
+				return;
+			}
+
+			// Verify screenshot exists
+			try {
+				await fs.access(screenshotPath);
+			} catch {
+				res.status(404).json({ error: 'Not found', message: 'Screenshot not found for this test' });
+				return;
+			}
+
+			// Set as reference
+			const info = await referenceRepository.setReference(slug, configId, category, testName, screenshotPath, buildId);
+			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.set', target: `${slug}/${configId}/${category}/${testName}`, details: { buildId } });
+			res.json(info);
+		} catch (error) {
+			next(error);
+		}
+	});
+
+	// DELETE /api/v1/projects/:slug/references/:configId/:category/:testName - Delete reference
+	router.delete('/projects/:slug/references/:configId/:category/:testName', async (req, res, next) => {
+		try {
+			const { slug, configId, category, testName } = req.params;
+
+			const deleted = await referenceRepository.deleteReference(slug, configId, category, testName);
+			if (!deleted) {
+				res.status(404).json({ error: 'Not found', message: 'Reference not found' });
+				return;
+			}
+
+			auditLog?.append({ actor: AuditLog.actorOf(req), action: 'reference.delete', target: `${slug}/${configId}/${category}/${testName}` });
+			res.json({ success: true });
 		} catch (error) {
 			next(error);
 		}

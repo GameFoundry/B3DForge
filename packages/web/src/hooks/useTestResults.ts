@@ -59,33 +59,33 @@ export function useSnapshotTests(buildId: string) {
 /**
  * Hook to fetch a specific snapshot test result
  */
-export function useSnapshotDetails(buildId: string, testName: string) {
+export function useSnapshotDetails(buildId: string, category: string, testName: string) {
 	return useQuery({
-		queryKey: ['tests', buildId, 'snapshots', testName],
-		queryFn: () => testsApi.getSnapshotDetails(buildId, testName),
-		enabled: !!buildId && !!testName,
+		queryKey: ['tests', buildId, 'snapshots', category, testName],
+		queryFn: () => testsApi.getSnapshotDetails(buildId, category, testName),
+		enabled: !!buildId && !!category && !!testName,
 	});
 }
 
 /**
  * Hook to fetch snapshot log
  */
-export function useSnapshotLog(buildId: string, testName: string) {
+export function useSnapshotLog(buildId: string, category: string, testName: string) {
 	return useQuery({
-		queryKey: ['tests', buildId, 'snapshots', testName, 'log'],
-		queryFn: () => testsApi.getSnapshotLog(buildId, testName).then(r => r.log),
-		enabled: !!buildId && !!testName,
+		queryKey: ['tests', buildId, 'snapshots', category, testName, 'log'],
+		queryFn: () => testsApi.getSnapshotLog(buildId, category, testName).then(r => r.log),
+		enabled: !!buildId && !!category && !!testName,
 	});
 }
 
 /**
  * Hook to compare a snapshot with its reference
  */
-export function useSnapshotComparison(buildId: string, testName: string) {
+export function useSnapshotComparison(buildId: string, category: string, testName: string) {
 	return useQuery({
-		queryKey: ['tests', buildId, 'snapshots', testName, 'compare'],
-		queryFn: () => testsApi.compareSnapshot(buildId, testName),
-		enabled: !!buildId && !!testName,
+		queryKey: ['tests', buildId, 'snapshots', category, testName, 'compare'],
+		queryFn: () => testsApi.compareSnapshot(buildId, category, testName),
+		enabled: !!buildId && !!category && !!testName,
 	});
 }
 
@@ -121,20 +121,24 @@ export function useSetReference() {
 		mutationFn: ({
 			projectSlug,
 			configId,
+			category,
 			testName,
 			buildId,
 		}: {
 			projectSlug: string;
 			configId: string;
+			category: string;
 			testName: string;
 			buildId: string;
-		}) => referencesApi.setReference(projectSlug, configId, testName, buildId),
-		onSuccess: (_, { projectSlug, configId, buildId, testName }) => {
+		}) => referencesApi.setReference(projectSlug, configId, category, testName, buildId),
+		onSuccess: (_, { projectSlug, configId, buildId, category, testName }) => {
 			// Invalidate references cache
 			queryClient.invalidateQueries({ queryKey: ['references', projectSlug] });
 			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, configId] });
 			// Invalidate comparison cache for this test
-			queryClient.invalidateQueries({ queryKey: ['tests', buildId, 'snapshots', testName, 'compare'] });
+			queryClient.invalidateQueries({ queryKey: ['tests', buildId, 'snapshots', category, testName, 'compare'] });
+			// Refresh the results list so diff percentages update
+			queryClient.invalidateQueries({ queryKey: ['tests', buildId], exact: true });
 		},
 	});
 }
@@ -149,12 +153,14 @@ export function useDeleteReference() {
 		mutationFn: ({
 			projectSlug,
 			configId,
+			category,
 			testName,
 		}: {
 			projectSlug: string;
 			configId: string;
+			category: string;
 			testName: string;
-		}) => referencesApi.deleteReference(projectSlug, configId, testName),
+		}) => referencesApi.deleteReference(projectSlug, configId, category, testName),
 		onSuccess: (_, { projectSlug, configId }) => {
 			queryClient.invalidateQueries({ queryKey: ['references', projectSlug] });
 			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, configId] });

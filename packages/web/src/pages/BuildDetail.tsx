@@ -478,7 +478,9 @@ export function BuildDetail() {
               <div className="h-full overflow-y-auto bg-gray-900 rounded-lg p-4">
                 {testResults?.snapshotTests?.results && testResults.snapshotTests.results.length > 0 ? (
                   <SnapshotTestResults
+                    key={build.id}
                     results={testResults.snapshotTests.results}
+                    categories={testResults.snapshotTests.categories}
                     buildId={build.id}
                     projectSlug={build.projectSlug}
                     configurationId={build.configurationId || 'default'}

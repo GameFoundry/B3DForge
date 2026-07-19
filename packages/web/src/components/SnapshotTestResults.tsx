@@ -1,10 +1,14 @@
 import { useState, useMemo } from 'react';
 import type { AggregatedSnapshotResult, SnapshotTestStatus } from '@banshee-forge/shared';
+import { DEFAULT_SNAPSHOT_CATEGORY } from '@banshee-forge/shared';
 import { testsApi } from '../api/client';
 import { SnapshotComparisonModal } from './SnapshotComparisonModal';
 
 interface SnapshotTestResultsProps {
 	results: AggregatedSnapshotResult[];
+	/** Ordered category names (sub-tab order). The server always provides this, but
+	 *  the component tolerates its absence for robustness. */
+	categories?: string[];
 	buildId: string;
 	projectSlug: string;
 	configurationId: string;
@@ -12,6 +16,11 @@ interface SnapshotTestResultsProps {
 
 type FilterType = 'all' | 'passed' | 'failed';
 type ViewMode = 'grid' | 'list';
+
+interface SelectedTest {
+	category: string;
+	testName: string;
+}
 
 const statusColors: Record<SnapshotTestStatus, string> = {
 	passed: 'bg-green-900/50 text-green-300 border-green-800',
@@ -27,14 +36,40 @@ const statusIcons: Record<SnapshotTestStatus, string> = {
 	crashed: '💥',
 };
 
-export function SnapshotTestResults({ results, buildId, projectSlug, configurationId }: SnapshotTestResultsProps) {
+export function SnapshotTestResults({ results, categories, buildId, projectSlug, configurationId }: SnapshotTestResultsProps) {
 	const [filter, setFilter] = useState<FilterType>('all');
 	const [viewMode, setViewMode] = useState<ViewMode>('grid');
 	const [searchQuery, setSearchQuery] = useState('');
-	const [selectedTest, setSelectedTest] = useState<string | null>(null);
+	const [selectedTest, setSelectedTest] = useState<SelectedTest | null>(null);
+
+	const cats = useMemo(() => {
+		if (categories && categories.length > 0) return categories;
+		const derived = [...new Set(results.map(r => r.category ?? DEFAULT_SNAPSHOT_CATEGORY))];
+		return derived.length > 0 ? derived : [DEFAULT_SNAPSHOT_CATEGORY];
+	}, [categories, results]);
+
+	const [activeCategory, setActiveCategory] = useState(cats[0]);
+	// Guard against the category list changing under us (e.g. refetch)
+	const effectiveCategory = cats.includes(activeCategory) ? activeCategory : cats[0];
+
+	const categoryStats = useMemo(() => {
+		const stats = new Map<string, { total: number; passed: number; failed: number }>();
+		for (const result of results) {
+			const category = result.category ?? DEFAULT_SNAPSHOT_CATEGORY;
+			const entry = stats.get(category) ?? { total: 0, passed: 0, failed: 0 };
+			entry.total++;
+			if (result.statusText === 'passed') entry.passed++;
+			if (result.statusText === 'failed' || result.statusText === 'crashed') entry.failed++;
+			stats.set(category, entry);
+		}
+		return stats;
+	}, [results]);
 
 	const filteredResults = useMemo(() => {
 		return results.filter(result => {
+			// Filter by active category
+			if ((result.category ?? DEFAULT_SNAPSHOT_CATEGORY) !== effectiveCategory) return false;
+
 			// Filter by status
 			if (filter === 'passed' && result.statusText !== 'passed') return false;
 			if (filter === 'failed' && result.statusText !== 'failed' && result.statusText !== 'crashed') return false;
@@ -47,10 +82,43 @@ export function SnapshotTestResults({ results, buildId, projectSlug, configurati
 
 			return true;
 		});
-	}, [results, filter, searchQuery]);
+	}, [results, effectiveCategory, filter, searchQuery]);
 
 	return (
 		<div className="space-y-4">
+			{/* Category sub-tabs (only shown when more than one category exists) */}
+			{cats.length > 1 && (
+				<div className="border-b border-gray-700">
+					<nav className="-mb-px flex space-x-6">
+						{cats.map(category => {
+							const stats = categoryStats.get(category);
+							return (
+								<button
+									key={category}
+									onClick={() => setActiveCategory(category)}
+									className={`py-2 px-1 border-b-2 font-medium text-sm ${
+										effectiveCategory === category
+											? 'border-blue-500 text-blue-400'
+											: 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
+									}`}
+								>
+									{category}
+									{stats && (
+										<span className={`ml-2 px-2 py-0.5 text-xs rounded-full ${
+											stats.failed > 0
+												? 'bg-red-900/50 text-red-300'
+												: 'bg-green-900/50 text-green-300'
+										}`}>
+											{stats.passed}/{stats.total}
+										</span>
+									)}
+								</button>
+							);
+						})}
+					</nav>
+				</div>
+			)}
+
 			{/* Filters */}
 			<div className="flex items-center gap-4">
 				<div className="flex-1">
@@ -98,10 +166,13 @@ export function SnapshotTestResults({ results, buildId, projectSlug, configurati
 				<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
 					{filteredResults.map(result => (
 						<SnapshotCard
-							key={result.testName}
+							key={`${result.category ?? DEFAULT_SNAPSHOT_CATEGORY}/${result.testName}`}
 							result={result}
 							buildId={buildId}
-							onClick={() => setSelectedTest(result.testName)}
+							onClick={() => setSelectedTest({
+								category: result.category ?? DEFAULT_SNAPSHOT_CATEGORY,
+								testName: result.testName,
+							})}
 						/>
 					))}
 				</div>
@@ -109,9 +180,12 @@ export function SnapshotTestResults({ results, buildId, projectSlug, configurati
 				<div className="space-y-2">
 					{filteredResults.map(result => (
 						<SnapshotListItem
-							key={result.testName}
+							key={`${result.category ?? DEFAULT_SNAPSHOT_CATEGORY}/${result.testName}`}
 							result={result}
-							onClick={() => setSelectedTest(result.testName)}
+							onClick={() => setSelectedTest({
+								category: result.category ?? DEFAULT_SNAPSHOT_CATEGORY,
+								testName: result.testName,
+							})}
 						/>
 					))}
 				</div>
@@ -121,9 +195,11 @@ export function SnapshotTestResults({ results, buildId, projectSlug, configurati
 			{selectedTest && (
 				<SnapshotComparisonModal
 					buildId={buildId}
-					testName={selectedTest}
+					category={selectedTest.category}
+					testName={selectedTest.testName}
 					projectSlug={projectSlug}
 					configurationId={configurationId}
+					showCategory={cats.length > 1}
 					onClose={() => setSelectedTest(null)}
 				/>
 			)}
@@ -140,7 +216,9 @@ function SnapshotCard({
 	buildId: string;
 	onClick: () => void;
 }) {
-	const screenshotUrl = testsApi.getScreenshotUrl(buildId, result.testName);
+	const screenshotUrl = testsApi.getScreenshotUrl(
+		buildId, result.category ?? DEFAULT_SNAPSHOT_CATEGORY, result.testName
+	);
 
 	return (
 		<div

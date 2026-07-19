@@ -5,22 +5,27 @@ import { ImageComparisonViewer } from './ImageComparisonViewer';
 
 interface SnapshotComparisonModalProps {
 	buildId: string;
+	category: string;
 	testName: string;
 	projectSlug: string;
 	configurationId: string;
+	/** Show the category next to the test name (used when a build has multiple categories) */
+	showCategory?: boolean;
 	onClose: () => void;
 }
 
 export function SnapshotComparisonModal({
 	buildId,
+	category,
 	testName,
 	projectSlug,
 	configurationId,
+	showCategory,
 	onClose,
 }: SnapshotComparisonModalProps) {
-	const { data: comparison, isLoading: comparisonLoading } = useSnapshotComparison(buildId, testName);
-	const { data: details, isLoading: detailsLoading } = useSnapshotDetails(buildId, testName);
-	const { data: log, isLoading: logLoading } = useSnapshotLog(buildId, testName);
+	const { data: comparison, isLoading: comparisonLoading } = useSnapshotComparison(buildId, category, testName);
+	const { data: details, isLoading: detailsLoading } = useSnapshotDetails(buildId, category, testName);
+	const { data: log, isLoading: logLoading } = useSnapshotLog(buildId, category, testName);
 	const setReferenceMutation = useSetReference();
 
 	// Close on escape key
@@ -42,12 +47,12 @@ export function SnapshotComparisonModal({
 
 	const isLoading = comparisonLoading || detailsLoading;
 
-	const screenshotUrl = testsApi.getScreenshotUrl(buildId, testName);
+	const screenshotUrl = testsApi.getScreenshotUrl(buildId, category, testName);
 	const referenceUrl = comparison?.hasReference
-		? referencesApi.getReferenceUrl(projectSlug, configurationId, testName)
+		? referencesApi.getReferenceUrl(projectSlug, configurationId, category, testName)
 		: undefined;
 	const diffUrl = comparison?.hasReference && comparison.diffImagePath
-		? testsApi.getDiffUrl(buildId, testName)
+		? testsApi.getDiffUrl(buildId, category, testName)
 		: undefined;
 
 	const handleSetAsReference = async () => {
@@ -55,6 +60,7 @@ export function SnapshotComparisonModal({
 			await setReferenceMutation.mutateAsync({
 				projectSlug,
 				configId: configurationId,
+				category,
 				testName,
 				buildId,
 			});
@@ -71,6 +77,11 @@ export function SnapshotComparisonModal({
 				<div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-gray-800">
 					<div className="flex items-center gap-4">
 						<h2 className="text-lg font-semibold text-gray-100">{testName}</h2>
+						{showCategory && (
+							<span className="px-2 py-1 text-sm rounded-full bg-gray-700 text-gray-300">
+								{category}
+							</span>
+						)}
 						{details && (
 							<span className={`px-2 py-1 text-sm rounded-full ${
 								details.statusText === 'passed'
@@ -229,7 +240,7 @@ export function SnapshotComparisonModal({
 								<div className="space-y-2">
 									<a
 										href={screenshotUrl}
-										download={`${testName}_screenshot.png`}
+										download={`${category}_${testName}_screenshot.png`}
 										className="block w-full px-3 py-2 text-sm text-center text-gray-200 border border-gray-600 rounded hover:bg-gray-700"
 									>
 										Download Screenshot
@@ -237,7 +248,7 @@ export function SnapshotComparisonModal({
 									{referenceUrl && (
 										<a
 											href={referenceUrl}
-											download={`${testName}_reference.png`}
+											download={`${category}_${testName}_reference.png`}
 											className="block w-full px-3 py-2 text-sm text-center text-gray-200 border border-gray-600 rounded hover:bg-gray-700"
 										>
 											Download Reference

@@ -190,7 +190,7 @@ export class BuildOrchestrator {
 						this.dataPath, 'projects', state.projectSlug, 'builds', event.buildId, 'results',
 					);
 					const testResults = await this.testResultsService.parseAndStoreResults(
-						state.projectSlug, event.buildId, resultsDir,
+						state.projectSlug, event.buildId, resultsDir, event.snapshotCategories,
 					);
 					testSummary = this.testResultsService.computeTestSummary(testResults);
 					this.io.to(`build:${event.buildId}`).emit('test_results', {

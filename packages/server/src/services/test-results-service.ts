@@ -4,9 +4,11 @@ import type {
 	BuildTestResults,
 	UnitTestOutput,
 	AggregatedSnapshotResult,
+	SnapshotCategoriesManifest,
 	TestSummary,
 	TestSuite
 } from '@banshee-forge/shared';
+import { DEFAULT_SNAPSHOT_CATEGORY } from '@banshee-forge/shared';
 import { TestResultsRepository } from '../repositories/test-results-repository.js';
 
 /**
@@ -22,21 +24,32 @@ export class TestResultsService {
 	/**
 	 * Parse test output files from the results directory and store aggregated results.
 	 *
-	 * Expected directory structure:
+	 * Expected directory structure (categories declared out-of-band via markers, see below):
 	 * resultsDir/
 	 * ├── unit_tests.json         # or test_results.json
 	 * └── snapshots/
-	 *     ├── ExampleLighting/
-	 *     │   ├── ExampleLighting_result.json
-	 *     │   ├── ExampleLighting_screenshot.png
-	 *     │   └── ExampleLighting_log.txt
-	 *     └── ExamplePhysics/
+	 *     ├── Vulkan/
+	 *     │   ├── Lighting/
+	 *     │   │   ├── Lighting_result.json
+	 *     │   │   ├── Lighting_screenshot.png
+	 *     │   │   └── Lighting_log.txt
+	 *     │   └── ...
+	 *     └── D3D12/
 	 *         └── ...
+	 *
+	 * Categories are declared by the test script via `::snapshot-category::` markers,
+	 * parsed from stdout by the agent and passed in as `declaredCategories`. When none
+	 * are provided the flat layout snapshots/{testName}/ is parsed instead, attributed
+	 * to DEFAULT_SNAPSHOT_CATEGORY (a snapshots/categories.json manifest, if present, is
+	 * honored as a defensive fallback before falling back to flat).
+	 *
+	 * @param	declaredCategories	Ordered snapshot categories from the agent's marker parsing.
 	 */
 	async parseAndStoreResults(
 		projectSlug: string,
 		buildId: string,
-		resultsDir: string
+		resultsDir: string,
+		declaredCategories?: string[]
 	): Promise<BuildTestResults> {
 		const results: BuildTestResults = { buildId };
 
@@ -59,7 +72,9 @@ export class TestResultsService {
 		}
 
 		// Parse snapshot tests
-		const snapshotResults = await this.parseSnapshotTests(resultsDir, projectSlug, buildId);
+		const { results: snapshotResults, categories } = await this.parseSnapshotTests(
+			resultsDir, projectSlug, buildId, declaredCategories
+		);
 		if (snapshotResults.length > 0) {
 			const passed = snapshotResults.filter(r => r.statusText === 'passed').length;
 			const failed = snapshotResults.filter(r =>
@@ -73,11 +88,18 @@ export class TestResultsService {
 					passed,
 					failed,
 				},
+				categories,
 			};
 
 			// Save individual snapshot results
 			for (const result of snapshotResults) {
-				await this.repository.saveSnapshotResult(projectSlug, buildId, result.testName, result);
+				await this.repository.saveSnapshotResult(
+					projectSlug,
+					buildId,
+					result.category ?? DEFAULT_SNAPSHOT_CATEGORY,
+					result.testName,
+					result
+				);
 			}
 		}
 
@@ -95,11 +117,7 @@ export class TestResultsService {
 		projectSlug: string,
 		buildId: string
 	): Promise<void> {
-		const destDir = path.join(
-			this.repository['storage']['basePath'],
-			this.repository['basePath'](projectSlug, buildId),
-			'unit'
-		);
+		const destDir = this.repository.getUnitTestAbsoluteDir(projectSlug, buildId);
 
 		await fs.mkdir(destDir, { recursive: true });
 
@@ -150,66 +168,127 @@ export class TestResultsService {
 	}
 
 	/**
-	 * Parse snapshot test results from the results directory
+	 * Parse the category manifest (snapshots/categories.json) written by the test script.
+	 * Returns null when absent or invalid, in which case the legacy flat layout is assumed.
+	 */
+	private async parseCategoriesManifest(snapshotsDir: string): Promise<SnapshotCategoriesManifest | null> {
+		const manifestPath = path.join(snapshotsDir, 'categories.json');
+		try {
+			let content = await fs.readFile(manifestPath, 'utf-8');
+			// Strip UTF-8 BOM if present
+			if (content.charCodeAt(0) === 0xFEFF) {
+				content = content.slice(1);
+			}
+			const parsed = JSON.parse(content);
+
+			if (
+				parsed.type === 'snapshot_categories' &&
+				Array.isArray(parsed.categories) &&
+				parsed.categories.every((c: any) => typeof c?.name === 'string' && c.name.length > 0)
+			) {
+				return parsed as SnapshotCategoriesManifest;
+			}
+		} catch {
+			// File doesn't exist or isn't valid JSON
+		}
+
+		return null;
+	}
+
+	/**
+	 * Parse snapshot test results from the results directory.
+	 *
+	 * Category list precedence:
+	 *   1. `declaredCategories` — from the script's `::snapshot-category::` markers (parsed by the agent).
+	 *   2. A snapshots/categories.json manifest, if present (defensive fallback for agent/script skew).
+	 * With either, tests are read from the nested snapshots/{category}/{testName}/ layout. When
+	 * neither is available the legacy flat snapshots/{testName}/ layout is parsed under
+	 * DEFAULT_SNAPSHOT_CATEGORY. Returns the results plus the ordered category list.
 	 */
 	private async parseSnapshotTests(
 		resultsDir: string,
 		projectSlug: string,
-		buildId: string
-	): Promise<AggregatedSnapshotResult[]> {
+		buildId: string,
+		declaredCategories?: string[]
+	): Promise<{ results: AggregatedSnapshotResult[]; categories: string[] }> {
 		const snapshotsDir = path.join(resultsDir, 'snapshots');
 		const results: AggregatedSnapshotResult[] = [];
 
-		try {
-			const entries = await fs.readdir(snapshotsDir, { withFileTypes: true });
+		// Determine the ordered category list and whether the layout is nested (categorized)
+		// or the legacy flat layout.
+		let categories: string[] | null =
+			declaredCategories && declaredCategories.length > 0 ? declaredCategories : null;
+		if (!categories) {
+			const manifest = await this.parseCategoriesManifest(snapshotsDir);
+			categories = manifest ? manifest.categories.map(c => c.name) : null;
+		}
+		const isNested = categories !== null;
+		const effectiveCategories = categories ?? [DEFAULT_SNAPSHOT_CATEGORY];
 
-			for (const entry of entries) {
-				if (!entry.isDirectory()) continue;
+		for (const category of effectiveCategories) {
+			// Legacy (flat) layout has no category directory level
+			const categoryDir = isNested ? path.join(snapshotsDir, category) : snapshotsDir;
 
-				const testName = entry.name;
-				const testDir = path.join(snapshotsDir, testName);
+			try {
+				const entries = await fs.readdir(categoryDir, { withFileTypes: true });
 
-				// Find result.json file (may be named {testName}_result.json or result.json)
-				const result = await this.parseSnapshotResult(testDir, testName);
-				if (result) {
-					// Copy files to storage and update paths
-					await this.copySnapshotFiles(testDir, projectSlug, buildId, testName, result);
+				for (const entry of entries) {
+					if (!entry.isDirectory()) continue;
+
+					const testName = entry.name;
+					const testDir = path.join(categoryDir, testName);
+					const result = await this.parseSnapshotTestDir(testDir, projectSlug, buildId, category, testName);
 					results.push(result);
-				} else {
-					// No result.json found - check log for actual error indicators
-					// before assuming crashed
-					const hasErrors = await this.logContainsErrors(testDir, testName);
-					if (hasErrors) {
-						const crashedResult = await this.createCrashedSnapshotResult(
-							testDir,
-							testName,
-							projectSlug,
-							buildId
-						);
-						results.push(crashedResult);
-					} else {
-						// Test exited cleanly but produced no result.json
-						const passedResult: AggregatedSnapshotResult = {
-							type: 'snapshot_test',
-							testName,
-							status: 0,
-							statusText: 'passed',
-							totalFrames: 0,
-							executionTimeSeconds: 0,
-							screenshotPath: '',
-							errors: [],
-							warnings: ['No result.json was produced by the test'],
-						};
-						await this.copyCrashedSnapshotFiles(testDir, projectSlug, buildId, testName, passedResult);
-						results.push(passedResult);
-					}
 				}
+			} catch {
+				// Category (or snapshots) directory doesn't exist, that's fine
 			}
-		} catch {
-			// Snapshots directory doesn't exist, that's fine
 		}
 
-		return results;
+		return { results, categories: results.length > 0 ? effectiveCategories : [] };
+	}
+
+	/**
+	 * Parse a single test's output directory into a result, synthesizing a crashed or
+	 * passed result when no result.json was produced. Copies files into storage.
+	 */
+	private async parseSnapshotTestDir(
+		testDir: string,
+		projectSlug: string,
+		buildId: string,
+		category: string,
+		testName: string
+	): Promise<AggregatedSnapshotResult> {
+		// Find result.json file (may be named {testName}_result.json or result.json)
+		const result = await this.parseSnapshotResult(testDir, testName);
+		if (result) {
+			result.category = category;
+			// Copy files to storage and update paths
+			await this.copySnapshotFiles(testDir, projectSlug, buildId, category, testName, result);
+			return result;
+		}
+
+		// No result.json found - check log for actual error indicators before assuming crashed
+		const hasErrors = await this.logContainsErrors(testDir, testName);
+		if (hasErrors) {
+			return this.createCrashedSnapshotResult(testDir, projectSlug, buildId, category, testName);
+		}
+
+		// Test exited cleanly but produced no result.json
+		const passedResult: AggregatedSnapshotResult = {
+			type: 'snapshot_test',
+			testName,
+			category,
+			status: 0,
+			statusText: 'passed',
+			totalFrames: 0,
+			executionTimeSeconds: 0,
+			screenshotPath: '',
+			errors: [],
+			warnings: ['No result.json was produced by the test'],
+		};
+		await this.copyCrashedSnapshotFiles(testDir, projectSlug, buildId, category, testName, passedResult);
+		return passedResult;
 	}
 
 	/**
@@ -252,15 +331,11 @@ export class TestResultsService {
 		sourceDir: string,
 		projectSlug: string,
 		buildId: string,
+		category: string,
 		testName: string,
 		result: AggregatedSnapshotResult
 	): Promise<void> {
-		const destDir = path.join(
-			this.repository['storage']['basePath'],
-			this.repository['basePath'](projectSlug, buildId),
-			'snapshots',
-			testName
-		);
+		const destDir = this.repository.getSnapshotAbsoluteDir(projectSlug, buildId, category, testName);
 
 		await fs.mkdir(destDir, { recursive: true });
 
@@ -314,9 +389,10 @@ export class TestResultsService {
 	 */
 	private async createCrashedSnapshotResult(
 		testDir: string,
-		testName: string,
 		projectSlug: string,
-		buildId: string
+		buildId: string,
+		category: string,
+		testName: string
 	): Promise<AggregatedSnapshotResult> {
 		const errors: string[] = [];
 
@@ -355,6 +431,7 @@ export class TestResultsService {
 		const crashedResult: AggregatedSnapshotResult = {
 			type: 'snapshot_test',
 			testName,
+			category,
 			status: -1,
 			statusText: 'crashed',
 			totalFrames: 0,
@@ -365,7 +442,7 @@ export class TestResultsService {
 		};
 
 		// Copy any available files and save result
-		await this.copyCrashedSnapshotFiles(testDir, projectSlug, buildId, testName, crashedResult);
+		await this.copyCrashedSnapshotFiles(testDir, projectSlug, buildId, category, testName, crashedResult);
 
 		return crashedResult;
 	}
@@ -401,15 +478,11 @@ export class TestResultsService {
 		sourceDir: string,
 		projectSlug: string,
 		buildId: string,
+		category: string,
 		testName: string,
 		result: AggregatedSnapshotResult
 	): Promise<void> {
-		const destDir = path.join(
-			this.repository['storage']['basePath'],
-			this.repository['basePath'](projectSlug, buildId),
-			'snapshots',
-			testName
-		);
+		const destDir = this.repository.getSnapshotAbsoluteDir(projectSlug, buildId, category, testName);
 
 		await fs.mkdir(destDir, { recursive: true });
 
@@ -487,16 +560,22 @@ export class TestResultsService {
 	async getSnapshotResult(
 		projectSlug: string,
 		buildId: string,
+		category: string,
 		testName: string
 	): Promise<AggregatedSnapshotResult | null> {
-		return this.repository.getSnapshotResult(projectSlug, buildId, testName);
+		return this.repository.getSnapshotResult(projectSlug, buildId, category, testName);
 	}
 
 	/**
 	 * Get snapshot log content
 	 */
-	async getSnapshotLog(projectSlug: string, buildId: string, testName: string): Promise<string | null> {
-		return this.repository.getSnapshotLog(projectSlug, buildId, testName);
+	async getSnapshotLog(
+		projectSlug: string,
+		buildId: string,
+		category: string,
+		testName: string
+	): Promise<string | null> {
+		return this.repository.getSnapshotLog(projectSlug, buildId, category, testName);
 	}
 
 	/**

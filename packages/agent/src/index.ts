@@ -145,6 +145,7 @@ async function runBuild(
 				status,
 				exitCode,
 				repositoryCommits: executor.getRepositoryCommits(),
+				snapshotCategories: executor.getSnapshotCategories(),
 			});
 			activeExecutors.delete(buildId);
 			client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });

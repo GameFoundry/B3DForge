@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import path from 'path';
 import { promises as fs } from 'fs';
+import { DEFAULT_SNAPSHOT_CATEGORY } from '@banshee-forge/shared';
 import { TestResultsService } from '../services/test-results-service.js';
 import { ImageComparisonService } from '../services/image-comparison-service.js';
 import { TestResultsRepository } from '../repositories/test-results-repository.js';
@@ -14,8 +14,7 @@ export function createTestRoutes(
 	imageComparisonService: ImageComparisonService,
 	referenceRepository: ReferenceRepository,
 	projectRepo: ProjectRepository,
-	buildRepo: BuildRepository,
-	dataPath: string
+	buildRepo: BuildRepository
 ): Router {
 	const router = Router();
 
@@ -50,24 +49,37 @@ export function createTestRoutes(
 
 			// Enrich snapshot results with diff percentages
 			if (results.snapshotTests?.results) {
+				const snapshotTests = results.snapshotTests;
+
+				// Normalize legacy stored data so clients always see categories
+				for (const snapshot of snapshotTests.results) {
+					snapshot.category = snapshot.category ?? DEFAULT_SNAPSHOT_CATEGORY;
+				}
+				if (!snapshotTests.categories || snapshotTests.categories.length === 0) {
+					snapshotTests.categories = [...new Set(snapshotTests.results.map(s => s.category!))];
+				}
+
 				const build = await buildRepo.findById(projectSlug, buildId);
 				if (build) {
 					const configurationId = build.configurationId || 'default';
 					const manifest = await referenceRepository.getManifest(projectSlug, configurationId);
 
-					await Promise.all(results.snapshotTests.results.map(async (snapshot) => {
+					await Promise.all(snapshotTests.results.map(async (snapshot) => {
 						if (snapshot.statusText === 'crashed' || !snapshot.screenshotPath)
 							return;
-						if (!manifest.references[snapshot.testName])
+
+						const category = snapshot.category!;
+						if (!manifest.references[`${category}/${snapshot.testName}`])
 							return;
 
 						try {
-							const screenshotPath = path.join(
-								dataPath,
-								testResultsRepository.getScreenshotFilePath(projectSlug, buildId, snapshot.testName)
+							const screenshotPath = await testResultsRepository.resolveSnapshotFilePath(
+								projectSlug, buildId, category, snapshot.testName, 'screenshot.png'
 							);
+							if (!screenshotPath) return;
+
 							const referencePath = referenceRepository.getReferenceImagePath(
-								projectSlug, configurationId, snapshot.testName
+								projectSlug, configurationId, category, snapshot.testName
 							);
 
 							const [screenshotStat, referenceStat] = await Promise.all([
@@ -180,10 +192,10 @@ export function createTestRoutes(
 		}
 	});
 
-	// GET /api/v1/builds/:buildId/tests/snapshots/:testName - Get specific snapshot result
-	router.get('/builds/:buildId/tests/snapshots/:testName', async (req, res, next) => {
+	// GET /api/v1/builds/:buildId/tests/snapshots/:category/:testName - Get specific snapshot result
+	router.get('/builds/:buildId/tests/snapshots/:category/:testName', async (req, res, next) => {
 		try {
-			const { buildId, testName } = req.params;
+			const { buildId, category, testName } = req.params;
 			const projectSlug = await findProjectSlugForBuild(buildId);
 
 			if (!projectSlug) {
@@ -191,7 +203,7 @@ export function createTestRoutes(
 				return;
 			}
 
-			const snapshot = await testResultsService.getSnapshotResult(projectSlug, buildId, testName);
+			const snapshot = await testResultsService.getSnapshotResult(projectSlug, buildId, category, testName);
 			if (!snapshot) {
 				res.status(404).json({ error: 'Not found', message: 'Snapshot test not found' });
 				return;
@@ -203,10 +215,10 @@ export function createTestRoutes(
 		}
 	});
 
-	// GET /api/v1/builds/:buildId/tests/snapshots/:testName/screenshot - Get screenshot image
-	router.get('/builds/:buildId/tests/snapshots/:testName/screenshot', async (req, res, next) => {
+	// GET /api/v1/builds/:buildId/tests/snapshots/:category/:testName/screenshot - Get screenshot image
+	router.get('/builds/:buildId/tests/snapshots/:category/:testName/screenshot', async (req, res, next) => {
 		try {
-			const { buildId, testName } = req.params;
+			const { buildId, category, testName } = req.params;
 			const projectSlug = await findProjectSlugForBuild(buildId);
 
 			if (!projectSlug) {
@@ -214,10 +226,14 @@ export function createTestRoutes(
 				return;
 			}
 
-			const screenshotPath = path.join(
-				dataPath,
-				testResultsRepository.getScreenshotFilePath(projectSlug, buildId, testName)
+			const screenshotPath = await testResultsRepository.resolveSnapshotFilePath(
+				projectSlug, buildId, category, testName, 'screenshot.png'
 			);
+
+			if (!screenshotPath) {
+				res.status(404).json({ error: 'Not found', message: 'Snapshot test not found' });
+				return;
+			}
 
 			try {
 				await fs.access(screenshotPath);
@@ -230,10 +246,10 @@ export function createTestRoutes(
 		}
 	});
 
-	// GET /api/v1/builds/:buildId/tests/snapshots/:testName/log - Get snapshot log
-	router.get('/builds/:buildId/tests/snapshots/:testName/log', async (req, res, next) => {
+	// GET /api/v1/builds/:buildId/tests/snapshots/:category/:testName/log - Get snapshot log
+	router.get('/builds/:buildId/tests/snapshots/:category/:testName/log', async (req, res, next) => {
 		try {
-			const { buildId, testName } = req.params;
+			const { buildId, category, testName } = req.params;
 			const projectSlug = await findProjectSlugForBuild(buildId);
 
 			if (!projectSlug) {
@@ -241,7 +257,7 @@ export function createTestRoutes(
 				return;
 			}
 
-			const log = await testResultsService.getSnapshotLog(projectSlug, buildId, testName);
+			const log = await testResultsService.getSnapshotLog(projectSlug, buildId, category, testName);
 			if (log === null) {
 				res.status(404).json({ error: 'Not found', message: 'Log not found' });
 				return;
@@ -253,10 +269,10 @@ export function createTestRoutes(
 		}
 	});
 
-	// GET /api/v1/builds/:buildId/tests/snapshots/:testName/compare - Compare with reference
-	router.get('/builds/:buildId/tests/snapshots/:testName/compare', async (req, res, next) => {
+	// GET /api/v1/builds/:buildId/tests/snapshots/:category/:testName/compare - Compare with reference
+	router.get('/builds/:buildId/tests/snapshots/:category/:testName/compare', async (req, res, next) => {
 		try {
-			const { buildId, testName } = req.params;
+			const { buildId, category, testName } = req.params;
 			const projectSlug = await findProjectSlugForBuild(buildId);
 
 			if (!projectSlug) {
@@ -274,7 +290,7 @@ export function createTestRoutes(
 			const configurationId = build.configurationId || 'default';
 
 			// Check if reference exists
-			const hasReference = await referenceRepository.hasReference(projectSlug, configurationId, testName);
+			const hasReference = await referenceRepository.hasReference(projectSlug, configurationId, category, testName);
 			if (!hasReference) {
 				res.json({
 					hasReference: false,
@@ -283,19 +299,22 @@ export function createTestRoutes(
 				return;
 			}
 
-			// Get paths
-			const screenshotPath = path.join(
-				dataPath,
-				testResultsRepository.getScreenshotFilePath(projectSlug, buildId, testName)
+			// Resolve paths inside the test's storage dir (handles legacy flat layout)
+			const screenshotPath = await testResultsRepository.resolveSnapshotFilePath(
+				projectSlug, buildId, category, testName, 'screenshot.png'
 			);
-			const referencePath = referenceRepository.getReferenceImagePath(projectSlug, configurationId, testName);
-			const diffPath = path.join(
-				dataPath,
-				testResultsRepository.getDiffFilePath(projectSlug, buildId, testName)
+			if (!screenshotPath) {
+				res.status(404).json({ error: 'Not found', message: 'Snapshot test not found' });
+				return;
+			}
+
+			const referencePath = referenceRepository.getReferenceImagePath(projectSlug, configurationId, category, testName);
+			const diffPath = await testResultsRepository.resolveSnapshotFilePath(
+				projectSlug, buildId, category, testName, 'diff.png'
 			);
 
 			// Compare images
-			const result = await imageComparisonService.compareImages(screenshotPath, referencePath, diffPath);
+			const result = await imageComparisonService.compareImages(screenshotPath, referencePath, diffPath!);
 
 			res.json({
 				hasReference: true,
@@ -306,10 +325,10 @@ export function createTestRoutes(
 		}
 	});
 
-	// GET /api/v1/builds/:buildId/tests/snapshots/:testName/diff - Get diff image
-	router.get('/builds/:buildId/tests/snapshots/:testName/diff', async (req, res, next) => {
+	// GET /api/v1/builds/:buildId/tests/snapshots/:category/:testName/diff - Get diff image
+	router.get('/builds/:buildId/tests/snapshots/:category/:testName/diff', async (req, res, next) => {
 		try {
-			const { buildId, testName } = req.params;
+			const { buildId, category, testName } = req.params;
 			const projectSlug = await findProjectSlugForBuild(buildId);
 
 			if (!projectSlug) {
@@ -317,10 +336,14 @@ export function createTestRoutes(
 				return;
 			}
 
-			const diffPath = path.join(
-				dataPath,
-				testResultsRepository.getDiffFilePath(projectSlug, buildId, testName)
+			const diffPath = await testResultsRepository.resolveSnapshotFilePath(
+				projectSlug, buildId, category, testName, 'diff.png'
 			);
+
+			if (!diffPath) {
+				res.status(404).json({ error: 'Not found', message: 'Snapshot test not found' });
+				return;
+			}
 
 			try {
 				await fs.access(diffPath);

@@ -31,6 +31,11 @@ async function retry<T>(
 export class JsonFileStorage {
   constructor(private basePath: string) {}
 
+  /** Absolute root directory all storage-relative paths are resolved against */
+  getBasePath(): string {
+    return this.basePath;
+  }
+
   async ensureDir(dirPath: string): Promise<void> {
     await fs.mkdir(dirPath, { recursive: true });
   }

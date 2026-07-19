@@ -3,11 +3,16 @@ import type { LogLevel, LogLine } from '../types/execution.js';
 export interface ParseResult {
   level: LogLevel;
   phase?: string;
+  /** Snapshot category declared by a `::snapshot-category::NAME` marker, if this line is one. */
+  snapshotCategory?: string;
   message: string;
 }
 
 // Phase marker: ::phase::NAME
 const PHASE_REGEX = /^::phase::(.+)$/;
+
+// Snapshot category declaration marker: ::snapshot-category::NAME
+const SNAPSHOT_CATEGORY_REGEX = /^::snapshot-category::(.+)$/;
 
 // Custom markers
 const WARNING_MARKER = /^::warning::(.+)$/;
@@ -40,6 +45,13 @@ export function parseLine(line: string): ParseResult {
   const phaseMatch = line.match(PHASE_REGEX);
   if (phaseMatch) {
     return { level: 'phase', phase: phaseMatch[1], message: line };
+  }
+
+  // Check for snapshot category declaration marker. Emitted as metadata (not a phase),
+  // so it's classified as a normal info line but carries the category name for the executor.
+  const categoryMatch = line.match(SNAPSHOT_CATEGORY_REGEX);
+  if (categoryMatch) {
+    return { level: 'info', snapshotCategory: categoryMatch[1].trim(), message: line };
   }
 
   // Check for bash xtrace output (commands starting with + or ++)

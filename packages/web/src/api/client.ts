@@ -182,17 +182,17 @@ export const testsApi = {
     fetchJson<TestSuite>(`${API_BASE}/builds/${buildId}/tests/unit/${suiteId}`),
   getSnapshots: (buildId: string) =>
     fetchJson<{ snapshots: AggregatedSnapshotResult[] }>(`${API_BASE}/builds/${buildId}/tests/snapshots`),
-  getSnapshotDetails: (buildId: string, testName: string) =>
-    fetchJson<AggregatedSnapshotResult>(`${API_BASE}/builds/${buildId}/tests/snapshots/${testName}`),
-  getSnapshotLog: (buildId: string, testName: string) =>
-    fetchJson<{ log: string }>(`${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/log`),
-  compareSnapshot: (buildId: string, testName: string) =>
-    fetchJson<ComparisonResultWithRef>(`${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/compare`),
+  getSnapshotDetails: (buildId: string, category: string, testName: string) =>
+    fetchJson<AggregatedSnapshotResult>(`${API_BASE}/builds/${buildId}/tests/snapshots/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`),
+  getSnapshotLog: (buildId: string, category: string, testName: string) =>
+    fetchJson<{ log: string }>(`${API_BASE}/builds/${buildId}/tests/snapshots/${encodeURIComponent(category)}/${encodeURIComponent(testName)}/log`),
+  compareSnapshot: (buildId: string, category: string, testName: string) =>
+    fetchJson<ComparisonResultWithRef>(`${API_BASE}/builds/${buildId}/tests/snapshots/${encodeURIComponent(category)}/${encodeURIComponent(testName)}/compare`),
   // URL getters for images (not fetched as JSON)
-  getScreenshotUrl: (buildId: string, testName: string) =>
-    `${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/screenshot`,
-  getDiffUrl: (buildId: string, testName: string) =>
-    `${API_BASE}/builds/${buildId}/tests/snapshots/${testName}/diff`,
+  getScreenshotUrl: (buildId: string, category: string, testName: string) =>
+    `${API_BASE}/builds/${buildId}/tests/snapshots/${encodeURIComponent(category)}/${encodeURIComponent(testName)}/screenshot`,
+  getDiffUrl: (buildId: string, category: string, testName: string) =>
+    `${API_BASE}/builds/${buildId}/tests/snapshots/${encodeURIComponent(category)}/${encodeURIComponent(testName)}/diff`,
 };
 
 // Agents API
@@ -223,21 +223,25 @@ export const referencesApi = {
     fetchJson<{ references: Record<string, ReferenceManifest> }>(`${API_BASE}/projects/${projectSlug}/references`),
   list: (projectSlug: string, configId: string) =>
     fetchJson<{ references: ReferenceInfo[] }>(`${API_BASE}/projects/${projectSlug}/references/${configId}`),
-  getInfo: (projectSlug: string, configId: string, testName: string) =>
-    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}/info`),
-  setReference: (projectSlug: string, configId: string, testName: string, buildId: string) =>
-    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}`, {
+  getInfo: (projectSlug: string, configId: string, category: string, testName: string) =>
+    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}/info`),
+  setReference: (projectSlug: string, configId: string, category: string, testName: string, buildId: string) =>
+    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`, {
       method: 'PUT', body: JSON.stringify({ buildId })
     }),
-  deleteReference: (projectSlug: string, configId: string, testName: string) =>
-    fetchJson<{ success: boolean }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}`, {
+  deleteReference: (projectSlug: string, configId: string, category: string, testName: string) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`, {
       method: 'DELETE'
     }),
   copyReferences: (projectSlug: string, destConfigId: string, sourceConfigId: string) =>
     fetchJson<{ success: boolean; copiedCount: number }>(`${API_BASE}/projects/${projectSlug}/references/${destConfigId}/copy`, {
       method: 'POST', body: JSON.stringify({ sourceConfigId })
     }),
+  copyCategoryReferences: (projectSlug: string, configId: string, sourceCategory: string, destCategory: string) =>
+    fetchJson<{ success: boolean; copiedCount: number }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/copy-category`, {
+      method: 'POST', body: JSON.stringify({ sourceCategory, destCategory })
+    }),
   // URL getter for reference image
-  getReferenceUrl: (projectSlug: string, configId: string, testName: string) =>
-    `${API_BASE}/projects/${projectSlug}/references/${configId}/${testName}`,
+  getReferenceUrl: (projectSlug: string, configId: string, category: string, testName: string) =>
+    `${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`,
 };

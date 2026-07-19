@@ -78,6 +78,7 @@ export class BuildExecutor extends EventEmitter {
 	private timeoutId: NodeJS.Timeout | null = null;
 	private repositoryCommits: RepositoryCommitInfo[] = [];
 	private resultsDir: string | null = null;
+	private snapshotCategories: string[] = [];
 
 	private logBuffer: LogLine[] = [];
 	private logFlushTimer: NodeJS.Timeout | null = null;
@@ -270,6 +271,8 @@ export class BuildExecutor extends EventEmitter {
 	getErrorCount(): number { return this.errorCount; }
 	getRepositoryCommits(): RepositoryCommitInfo[] { return [...this.repositoryCommits]; }
 	getResultsDir(): string | null { return this.resultsDir; }
+	/** Snapshot categories declared via `::snapshot-category::` markers, in emission order. */
+	getSnapshotCategories(): string[] { return [...this.snapshotCategories]; }
 
 	private async writeInlineScript(scriptsDir: string, name: string, body: string): Promise<string> {
 		const filePath = path.join(scriptsDir, name);
@@ -464,6 +467,10 @@ export class BuildExecutor extends EventEmitter {
 			if (result.phase) {
 				this.finishCurrentPhase('success');
 				this.startPhase(result.phase);
+			}
+
+			if (result.snapshotCategory && !this.snapshotCategories.includes(result.snapshotCategory)) {
+				this.snapshotCategories.push(result.snapshotCategory);
 			}
 
 			if (result.level === 'warning') {

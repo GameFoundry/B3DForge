@@ -151,15 +151,13 @@ app.use('/api/v1', createTestRoutes(
 	imageComparisonService,
 	referenceRepo,
 	projectRepo,
-	buildRepo,
-	DATA_PATH
+	buildRepo
 ));
 app.use('/api/v1', createReferenceRoutes(
 	referenceRepo,
 	testResultsRepo,
 	projectRepo,
 	buildRepo,
-	DATA_PATH,
 	auditLog
 ));
 
