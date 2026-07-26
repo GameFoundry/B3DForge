@@ -142,7 +142,7 @@ app.use('/api/v1', requireUser);
 
 app.use('/api/v1/projects', createProjectRoutes(projectRepo, pollingService, auditLog));
 app.use('/api/v1', createBuildRoutes(buildRepo, projectRepo, orchestrator, auditLog));
-app.use('/api/v1', createAgentRoutes(agentRegistry));
+app.use('/api/v1', createAgentRoutes(agentRegistry, auditLog));
 app.use('/api/v1/agent-tokens', createAgentTokenRoutes(agentTokensRepo, auditLog));
 app.use('/api/v1/config', createConfigRoutes(configService, auditLog));
 app.use('/api/v1', createTestRoutes(

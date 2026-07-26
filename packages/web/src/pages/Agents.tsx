@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { io as createSocket, Socket } from 'socket.io-client';
 import type { AgentInfo } from '@banshee-forge/shared';
 import { agentsApi } from '../api/client';
+import { AgentArtifacts } from '../components/AgentArtifacts';
 
 export function Agents() {
 	const queryClient = useQueryClient();
@@ -72,6 +73,7 @@ export function Agents() {
 								<th className="px-4 py-3">Labels</th>
 								<th className="px-4 py-3">Active</th>
 								<th className="px-4 py-3">Connected</th>
+								<th className="px-4 py-3">Artifacts</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-gray-700">
@@ -90,6 +92,9 @@ export function Agents() {
 									</td>
 									<td className="px-4 py-3 text-xs text-gray-400">
 										{new Date(agent.connectedAt).toLocaleString()}
+									</td>
+									<td className="px-4 py-3 text-sm">
+										<AgentArtifacts agent={agent} />
 									</td>
 								</tr>
 							))}

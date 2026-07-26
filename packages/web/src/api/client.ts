@@ -7,7 +7,7 @@ import type {
   BuildTestResults, UnitTestOutput, TestSuite, AggregatedSnapshotResult,
   ComparisonResult, ReferenceInfo, ReferenceManifest,
   AuthMeResponse, LoginRequest,
-  AgentInfo, AgentTokenPublic,
+  AgentInfo, AgentTokenPublic, AgentArtifactUsage, AgentPurgeArtifactsResult,
 } from '@banshee-forge/shared';
 
 export interface ScriptResponse {
@@ -199,6 +199,13 @@ export const testsApi = {
 export const agentsApi = {
   list: () => fetchJson<{ agents: AgentInfo[] }>(`${API_BASE}/agents`),
   get: (id: string) => fetchJson<AgentInfo>(`${API_BASE}/agents/${id}`),
+  /** Slow — the agent walks its whole artifact tree to answer this. */
+  getArtifactUsage: (id: string) =>
+    fetchJson<AgentArtifactUsage>(`${API_BASE}/agents/${id}/artifacts`),
+  purgeArtifacts: (id: string) =>
+    fetchJson<AgentPurgeArtifactsResult>(`${API_BASE}/agents/${id}/artifacts/purge`, {
+      method: 'POST',
+    }),
 };
 
 // Agent token API

@@ -112,3 +112,44 @@ export interface AgentErrorEvent {
 export interface BuildCancelEvent {
 	buildId: string;
 }
+
+/**
+ * Disk usage of the per-build artifact directories an agent keeps locally.
+ *
+ * Build artifacts (the CMake install tree) never leave the agent — only logs and test results are
+ * uploaded — so nothing prunes them and they accumulate at roughly one full install tree per build.
+ * Reported in response to `maintenance:artifact-usage`. Computing it walks the whole artifact
+ * tree, which takes seconds rather than milliseconds — callers should treat it as a slow query
+ * and render the rest of the agent view without waiting for it.
+ */
+export interface AgentArtifactUsage {
+	/** Total bytes across every per-build artifacts directory. */
+	totalBytes: number;
+	/** Number of builds that have an artifacts directory on disk. */
+	buildCount: number;
+	/** Bytes a purge would reclaim, i.e. excluding builds that are currently running. */
+	purgeableBytes: number;
+	/** Number of artifact directories a purge would delete. */
+	purgeableCount: number;
+	/** Absolute path of the directory holding per-build artifacts, for display. */
+	buildsRoot: string;
+}
+
+/**
+ * Envelope for orchestrator→agent request/response events that use Socket.IO acknowledgements
+ * (the `maintenance:*` events). Agent-side failures are reported in-band rather than by throwing,
+ * so the orchestrator can tell a genuine error apart from an unanswered request.
+ */
+export type AgentAck<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/** Outcome of a `maintenance:purge-artifacts` request. */
+export interface AgentPurgeArtifactsResult {
+	/** Number of artifact directories deleted. */
+	deletedCount: number;
+	/** Bytes reclaimed, measured before deletion. */
+	freedBytes: number;
+	/** Builds skipped because they were running at the time of the purge. */
+	skippedBuildIds: string[];
+	/** Human-readable failures (e.g. locked files); a non-empty list still means a partial purge ran. */
+	errors: string[];
+}

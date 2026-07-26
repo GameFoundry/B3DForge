@@ -29,6 +29,12 @@ export declare interface BuildExecutor {
 export interface ExecutorConfig {
 	/** Root directory under which per-project, per-configuration workspaces live. */
 	workspaceRoot: string;
+	/**
+	 * Root directory holding the per-build `results`/`artifacts` directories. Defaults to a
+	 * `builds` sibling of {@link workspaceRoot}. Shared with {@link ArtifactStore}, which purges
+	 * the artifact trees, so the two must agree on the layout.
+	 */
+	buildsRoot: string;
 	/** Root directory where inline script bodies are written before execution. */
 	scriptsRoot: string;
 	/** Default build timeout if the configuration doesn't override. */
@@ -59,6 +65,7 @@ const LOG_LINE_OVERHEAD_BYTES = 256;
 
 const DEFAULT_CONFIG: ExecutorConfig = {
 	workspaceRoot: '',
+	buildsRoot: '',
 	scriptsRoot: '',
 	defaultTimeoutMs: 60 * 60 * 1000,
 	logBufferIntervalMs: 100,
@@ -97,7 +104,8 @@ export class BuildExecutor extends EventEmitter {
 		const workspace = path.join(this.config.workspaceRoot, project.slug, configId);
 		// Per-build paths kept on the agent. Test results are uploaded to the orchestrator
 		// at end of build so they appear in the build detail UI; artifacts stay local.
-		const buildLocalDir = path.join(this.config.workspaceRoot, '..', 'builds', build.id);
+		const buildsRoot = this.config.buildsRoot || path.resolve(this.config.workspaceRoot, '..', 'builds');
+		const buildLocalDir = path.join(buildsRoot, build.id);
 		const resultsDir = path.join(buildLocalDir, 'results');
 		const artifactsDir = path.join(buildLocalDir, 'artifacts');
 		const scriptsDir = path.join(this.config.scriptsRoot, build.id);

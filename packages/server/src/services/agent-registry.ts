@@ -1,13 +1,22 @@
 import { EventEmitter } from 'events';
 import type { Socket } from 'socket.io';
 import type {
+	AgentAck,
+	AgentArtifactUsage,
 	AgentInfo,
+	AgentPurgeArtifactsResult,
 	AgentRegistration,
 	AgentStatus,
 	BuildAssignment,
 	BuildCancelEvent,
 } from '@banshee-forge/shared';
 import { generateId } from '@banshee-forge/shared';
+
+/**
+ * How long to wait for an agent to answer a `maintenance:*` request. Generous because both
+ * measuring and purging walk the full artifact tree, which is tens of gigabytes.
+ */
+const MAINTENANCE_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** A live agent connection, combining its declared info with the underlying socket. */
 export interface RegisteredAgent {
@@ -138,5 +147,36 @@ export class AgentRegistry extends EventEmitter {
 		if (!agent) return false;
 		agent.socket.emit('build:cancel', payload);
 		return true;
+	}
+
+	/** Measure the disk taken by the agent's local per-build artifact directories. */
+	requestArtifactUsage(agentId: string): Promise<AgentArtifactUsage> {
+		return this.request<AgentArtifactUsage>(agentId, 'maintenance:artifact-usage');
+	}
+
+	/**
+	 * Delete the agent's artifact directories for every build that isn't currently running.
+	 * Artifacts are never uploaded or served, so this only reclaims disk — no build history,
+	 * log or test result is affected.
+	 */
+	purgeArtifacts(agentId: string): Promise<AgentPurgeArtifactsResult> {
+		return this.request<AgentPurgeArtifactsResult>(agentId, 'maintenance:purge-artifacts');
+	}
+
+	/**
+	 * Send a request to an agent and await its acknowledgement. Rejects if the agent isn't
+	 * connected, reports an error, or doesn't answer within {@link MAINTENANCE_TIMEOUT_MS}.
+	 */
+	private async request<T>(agentId: string, event: string): Promise<T> {
+		const agent = this.agents.get(agentId);
+		if (!agent) throw new Error('Agent is not connected');
+
+		const response = await agent.socket
+			.timeout(MAINTENANCE_TIMEOUT_MS)
+			.emitWithAck(event, {}) as AgentAck<T> | undefined;
+
+		if (!response) throw new Error('Agent returned an empty response');
+		if (!response.ok) throw new Error(response.error);
+		return response.data;
 	}
 }

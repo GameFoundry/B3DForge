@@ -13,6 +13,8 @@ export interface AgentConfig {
 	arch: AgentArch;
 	hostname: string;
 	workspaceRoot: string;
+	/** Root holding per-build `results`/`artifacts` directories, keyed by build ID. */
+	buildsRoot: string;
 	scriptsRoot: string;
 	defaultTimeoutMs: number;
 }
@@ -24,6 +26,7 @@ export interface PartialAgentConfigFile {
 	labels?: string[];
 	maxParallelBuilds?: number;
 	workspaceRoot?: string;
+	buildsRoot?: string;
 	scriptsRoot?: string;
 	defaultTimeoutMs?: number;
 }
@@ -50,12 +53,20 @@ export async function loadConfig(): Promise<AgentConfig> {
 	if (!token) throw new Error('Missing agent token (BSF_AGENT_TOKEN)');
 
 	const home = process.env.BANSHEEFORGE_AGENT_HOME ?? path.join(os.homedir(), '.bansheeforge-agent');
-	const workspaceRoot = process.env.BSF_AGENT_WORKSPACE_ROOT
-		?? fileConfig.workspaceRoot
-		?? path.join(home, 'workspaces');
-	const scriptsRoot = process.env.BSF_AGENT_SCRIPTS_ROOT
-		?? fileConfig.scriptsRoot
-		?? path.join(home, 'scripts');
+	const workspaceRoot = resolveRoot('workspaceRoot',
+		process.env.BSF_AGENT_WORKSPACE_ROOT
+		|| fileConfig.workspaceRoot
+		|| path.join(home, 'workspaces'));
+	const scriptsRoot = resolveRoot('scriptsRoot',
+		process.env.BSF_AGENT_SCRIPTS_ROOT
+		|| fileConfig.scriptsRoot
+		|| path.join(home, 'scripts'));
+	// Sits alongside the workspaces directory (not inside it) so a workspace wipe can't take the
+	// uploaded-but-not-yet-flushed results with it.
+	const buildsRoot = resolveRoot('buildsRoot',
+		process.env.BSF_AGENT_BUILDS_ROOT
+		|| fileConfig.buildsRoot
+		|| path.resolve(workspaceRoot, '..', 'builds'));
 
 	const defaultTimeoutMs = parseInt(process.env.BSF_AGENT_TIMEOUT_MS ?? '', 10)
 		|| fileConfig.defaultTimeoutMs
@@ -71,6 +82,7 @@ export async function loadConfig(): Promise<AgentConfig> {
 		arch: process.arch as AgentArch,
 		hostname: os.hostname(),
 		workspaceRoot,
+		buildsRoot,
 		scriptsRoot,
 		defaultTimeoutMs,
 	};
@@ -93,6 +105,22 @@ async function readConfigFile(): Promise<PartialAgentConfigFile> {
 		}
 	}
 	return {};
+}
+
+/**
+ * Validate a configured root directory. These roots are deleted from recursively — workspaces on a
+ * clean build, artifacts on a purge — so a blank or relative value would retarget those deletes at
+ * the process working directory. Failing at startup makes that misconfiguration loud rather than
+ * destructive. Note the `||` chains feeding this: an empty string must fall through to the default,
+ * not be accepted as a value.
+ */
+function resolveRoot(name: string, value: string): string {
+	const trimmed = value.trim();
+	if (!trimmed) throw new Error(`Agent ${name} must not be empty`);
+	if (!path.isAbsolute(trimmed)) {
+		throw new Error(`Agent ${name} must be an absolute path, got '${trimmed}'`);
+	}
+	return path.normalize(trimmed);
 }
 
 function defaultName(): string {

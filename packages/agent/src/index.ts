@@ -4,6 +4,7 @@ import { AgentConfig, loadConfig } from './config.js';
 import { OrchestratorClient } from './orchestrator-client.js';
 import { BuildExecutor } from './build-executor.js';
 import { WorkspaceCleanup } from './workspace-cleanup.js';
+import { ArtifactStore } from './artifact-store.js';
 import { uploadResults } from './results-uploader.js';
 
 const VERSION = '0.1.0';
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
 	console.log(`  Labels:       ${config.labels.join(', ') || '(none)'}`);
 	console.log(`  Concurrency:  ${config.maxParallelBuilds}`);
 	console.log(`  Workspace:    ${config.workspaceRoot}`);
+	console.log(`  Builds:       ${config.buildsRoot}`);
 
 	const client = new OrchestratorClient(config.orchestratorUrl, config.token);
 	const activeExecutors = new Map<string, BuildExecutor>();
@@ -25,6 +27,20 @@ async function main(): Promise<void> {
 	setInterval(() => {
 		cleanup.cleanupAll().catch(err => console.error('Cleanup failed:', err));
 	}, 60 * 60 * 1000).unref();
+
+	// Artifact maintenance, driven on demand from the orchestrator UI. Running builds are excluded
+	// via a predicate over the live executor map, so a build assigned partway through a purge is
+	// still protected — a snapshot taken up front would not cover it.
+	const artifacts = new ArtifactStore(config.buildsRoot);
+	const isBuildActive = (buildId: string) => activeExecutors.has(buildId);
+	client.onMaintenanceRequest('maintenance:artifact-usage', () => artifacts.measure(isBuildActive));
+	client.onMaintenanceRequest('maintenance:purge-artifacts', async () => {
+		console.log('Purging build artifacts on orchestrator request');
+		const result = await artifacts.purge(isBuildActive);
+		const gib = (result.freedBytes / 1024 ** 3).toFixed(2);
+		console.log(`Purged ${result.deletedCount} artifact director${result.deletedCount === 1 ? 'y' : 'ies'} (${gib} GiB)`);
+		return result;
+	});
 
 	client.on('connect', () => {
 		console.log('Connected to orchestrator');
@@ -102,6 +118,7 @@ async function runBuild(
 
 	const executor = new BuildExecutor({
 		workspaceRoot: config.workspaceRoot,
+		buildsRoot: config.buildsRoot,
 		scriptsRoot: config.scriptsRoot,
 		defaultTimeoutMs: config.defaultTimeoutMs,
 		logBufferIntervalMs: 100,

@@ -1,5 +1,6 @@
 import { io as createSocket, Socket } from 'socket.io-client';
 import type {
+	AgentAck,
 	AgentRegistration,
 	AgentStatus,
 	AgentLogEvent,
@@ -68,6 +69,26 @@ export class OrchestratorClient {
 
 	sendError(event: AgentErrorEvent): void {
 		this.socket.emit('agent:error', event);
+	}
+
+	/**
+	 * Register a handler for an orchestrator-initiated `maintenance:*` request. The handler's
+	 * resolved value is returned to the orchestrator as the Socket.IO acknowledgement; a rejection
+	 * is reported in-band so the caller sees the reason instead of a timeout.
+	 */
+	onMaintenanceRequest<T>(event: string, handler: () => Promise<T>): void {
+		this.socket.on(event, (_payload: unknown, ack?: (response: AgentAck<T>) => void) => {
+			// An orchestrator that emitted without an acknowledgement callback has nothing to
+			// receive the result, but the work itself is still worth doing.
+			handler().then(
+				data => ack?.({ ok: true, data }),
+				(err: unknown) => {
+					const message = err instanceof Error ? err.message : String(err);
+					console.error(`Maintenance request '${event}' failed:`, message);
+					ack?.({ ok: false, error: message });
+				},
+			);
+		});
 	}
 
 	disconnect(): void {
