@@ -189,8 +189,6 @@ export class BuildRepository {
   }
 
   async appendLog(projectSlug: string, buildId: string, content: string): Promise<void> {
-    const logPath = `builds/${projectSlug}/${buildId}/log.txt`;
-    const existing = await this.storage.readText(logPath) ?? '';
-    await this.storage.writeText(logPath, existing + content);
+    await this.storage.appendText(`builds/${projectSlug}/${buildId}/log.txt`, content);
   }
 }

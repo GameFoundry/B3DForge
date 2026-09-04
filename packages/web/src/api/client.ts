@@ -142,10 +142,13 @@ export const buildsApi = {
     }),
   cancel: (id: string) => fetchJson<Build>(`${API_BASE}/builds/${id}`, { method: 'DELETE' }),
   getLog: (id: string) => fetchJson<{ log: string }>(`${API_BASE}/builds/${id}/log`),
-  getParsedLog: (id: string, fromLine = 0) =>
+  /** `limit` keeps only the most recent lines; `totalLines` still reports the full length. */
+  getParsedLog: (id: string, fromLine = 0, limit = 0) =>
     fetchJson<{ lines: LogLine[]; phases: string[]; totalLines: number }>(
-      `${API_BASE}/builds/${id}/log/parsed?fromLine=${fromLine}`
+      `${API_BASE}/builds/${id}/log/parsed?fromLine=${fromLine}${limit > 0 ? `&limit=${limit}` : ''}`
     ),
+  /** URL of the complete log as plain text, for when the parsed view is truncated. */
+  getRawLogUrl: (id: string) => `${API_BASE}/builds/${id}/log?format=text`,
 };
 
 // Queue API

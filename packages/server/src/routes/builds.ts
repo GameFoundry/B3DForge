@@ -158,6 +158,12 @@ export function createBuildRoutes(
         const build = await buildRepo.findById(project.slug, req.params.id);
         if (build) {
           const log = await buildRepo.getLog(project.slug, req.params.id);
+          // `format=text` serves the log for viewing/downloading whole, which is the escape
+          // hatch when the parsed view below is truncated.
+          if (req.query.format === 'text') {
+            res.type('text/plain').send(log ?? '');
+            return;
+          }
           res.json({ log: log ?? '' });
           return;
         }
@@ -184,10 +190,15 @@ export function createBuildRoutes(
           }
 
           const fromLine = parseInt(req.query.fromLine as string) || 0;
+          // A full engine build logs hundreds of thousands of lines once bash xtrace is on.
+          // Serializing all of them costs far more than any reader needs, so `limit` keeps the
+          // most recent slice; `totalLines` still reports the true length.
+          const limit = parseInt(req.query.limit as string) || 0;
           const { lines, phases } = parseLog(logText);
+          const selected = lines.slice(fromLine);
 
           res.json({
-            lines: lines.slice(fromLine),
+            lines: limit > 0 && selected.length > limit ? selected.slice(-limit) : selected,
             phases,
             totalLines: lines.length,
           });

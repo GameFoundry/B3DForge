@@ -118,6 +118,16 @@ export class JsonFileStorage {
     }
   }
 
+  /**
+   * Append to a text file, creating it if needed. Used for build logs, which arrive in many
+   * small batches: reading and rewriting the whole file per batch is quadratic in log size.
+   */
+  async appendText(filePath: string, content: string): Promise<void> {
+    const fullPath = path.join(this.basePath, filePath);
+    await this.ensureDir(path.dirname(fullPath));
+    await fs.appendFile(fullPath, content, 'utf-8');
+  }
+
   async writeText(filePath: string, content: string): Promise<void> {
     const fullPath = path.join(this.basePath, filePath);
     await this.ensureDir(path.dirname(fullPath));

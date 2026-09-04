@@ -6,6 +6,7 @@ import { getPlatformLabel } from '@banshee-forge/shared';
 import { useBuild, useParsedBuildLog, useCancelBuild } from '../hooks/useBuilds';
 import { useBuildSocket } from '../hooks/useBuildSocket';
 import { useTestResults } from '../hooks/useTestResults';
+import { buildsApi } from '../api/client';
 import { BuildStatusBadge } from '../components/BuildStatusBadge';
 import { LogViewer } from '../components/LogViewer';
 import { PhaseTimeline } from '../components/PhaseTimeline';
@@ -458,6 +459,8 @@ export function BuildDetail() {
                   logs={logs}
                   isLive={isLive}
                   initialFilter="all"
+                  totalLines={parsedLog?.totalLines}
+                  rawLogUrl={buildsApi.getRawLogUrl(id!)}
                 />
               )
             )}

@@ -1,13 +1,23 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import type { LogLine } from '@banshee-forge/shared';
 
+/**
+ * Lines rendered at once. Each line costs three DOM nodes, so an uncapped engine build log
+ * freezes the page for seconds. The tail is what matters; everything else stays a click away.
+ */
+const MAX_RENDERED_LINES = 2000;
+
 interface LogViewerProps {
   logs: LogLine[];
   isLive?: boolean;
   initialFilter?: 'all' | 'warning' | 'error' | 'trace';
+  /** Full line count of the build's log, which may exceed what was fetched into `logs`. */
+  totalLines?: number;
+  /** Link to the complete log, shown when the view is truncated. */
+  rawLogUrl?: string;
 }
 
-export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogViewerProps) {
+export function LogViewer({ logs, isLive = false, initialFilter = 'all', totalLines, rawLogUrl }: LogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState<'all' | 'warning' | 'error' | 'trace'>(initialFilter);
@@ -24,12 +34,24 @@ export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogVi
     });
   }, [logs, filter, search]);
 
+  const [renderAll, setRenderAll] = useState(false);
+
+  const visibleLogs = useMemo(() => (
+    renderAll || filteredLogs.length <= MAX_RENDERED_LINES
+      ? filteredLogs
+      : filteredLogs.slice(-MAX_RENDERED_LINES)
+  ), [filteredLogs, renderAll]);
+
+  // Lines dropped by the render cap, and lines the server never sent because of the fetch limit.
+  const notRendered = filteredLogs.length - visibleLogs.length;
+  const notFetched = Math.max(0, (totalLines ?? logs.length) - logs.length);
+
   // Auto-scroll when new logs arrive
   useEffect(() => {
     if (autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [filteredLogs.length, autoScroll]);
+  }, [visibleLogs.length, autoScroll]);
 
   // Detect manual scroll
   const handleScroll = () => {
@@ -123,6 +145,25 @@ export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogVi
         )}
       </div>
 
+      {(notRendered > 0 || notFetched > 0) && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-gray-800/60 border-b border-gray-700 text-xs text-gray-400">
+          <span>
+            Showing the last {visibleLogs.length.toLocaleString()} of{' '}
+            {(totalLines ?? filteredLogs.length).toLocaleString()} lines.
+          </span>
+          {notRendered > 0 && (
+            <button onClick={() => setRenderAll(true)} className="text-blue-400 hover:underline">
+              Render all {filteredLogs.length.toLocaleString()} loaded
+            </button>
+          )}
+          {rawLogUrl && (
+            <a href={rawLogUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+              Open full log
+            </a>
+          )}
+        </div>
+      )}
+
       {/* Log content */}
       <div
         ref={containerRef}
@@ -134,7 +175,7 @@ export function LogViewer({ logs, isLive = false, initialFilter = 'all' }: LogVi
             {logs.length === 0 ? 'No logs yet...' : 'No matching logs'}
           </div>
         ) : (
-          filteredLogs.map((log, i) => (
+          visibleLogs.map((log, i) => (
             <div
               key={`${log.lineNumber}-${i}`}
               className={`${getLevelClass(log.level)} whitespace-pre-wrap hover:bg-gray-800 py-0.5`}

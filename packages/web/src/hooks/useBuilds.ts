@@ -46,10 +46,16 @@ export function useBuildLog(id: string) {
   });
 }
 
+/**
+ * Lines fetched for the log view. Generous enough to cover any build's interesting tail, while
+ * keeping the response off the multi-megabyte scale a full xtrace build log would otherwise reach.
+ */
+export const LOG_FETCH_LIMIT = 20000;
+
 export function useParsedBuildLog(id: string) {
   return useQuery({
     queryKey: ['builds', id, 'log', 'parsed'],
-    queryFn: () => buildsApi.getParsedLog(id),
+    queryFn: () => buildsApi.getParsedLog(id, 0, LOG_FETCH_LIMIT),
     enabled: !!id,
     staleTime: 0, // Always refetch when component mounts
   });
