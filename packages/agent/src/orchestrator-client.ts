@@ -15,7 +15,7 @@ export interface OrchestratorClientEvents {
 	'connect': () => void;
 	'disconnect': (reason: string) => void;
 	'connect_error': (err: Error) => void;
-	'register-ack': (response: { ok: boolean; agentId?: string; error?: string }) => void;
+	'agent:register-ack': (response: { ok: boolean; agentId?: string; error?: string }) => void;
 	'build:assign': (payload: BuildAssignment) => void;
 	'build:cancel': (payload: BuildCancelEvent) => void;
 }

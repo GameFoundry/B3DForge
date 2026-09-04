@@ -82,7 +82,7 @@ async function main(): Promise<void> {
 		});
 	});
 
-	client.on('register-ack', (response) => {
+	client.on('agent:register-ack', (response) => {
 		if (response.ok) {
 			console.log(`Registered (agentId=${response.agentId})`);
 			client.markRegistered();
