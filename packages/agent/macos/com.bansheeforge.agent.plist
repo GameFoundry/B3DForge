@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+	launchd user agent for the BansheeForge build agent. Installed by install-macos-agent.sh into
+	~/Library/LaunchAgents with the placeholders below filled in. Runs inside the user's GUI session
+	(required for GPU access) and is restarted by launchd whenever it exits.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.bansheeforge.agent</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>__NODE__</string>
+		<string>__AGENT_SCRIPT__</string>
+	</array>
+
+	<key>WorkingDirectory</key>
+	<string>__AGENT_HOME__</string>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>NODE_ENV</key>
+		<string>production</string>
+		<key>BSF_AGENT_CONFIG</key>
+		<string>__AGENT_HOME__/agent.json</string>
+		<key>BANSHEEFORGE_AGENT_HOME</key>
+		<string>__AGENT_HOME__</string>
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>KeepAlive</key>
+	<true/>
+
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<key>StandardOutPath</key>
+	<string>__AGENT_HOME__/agent.log</string>
+
+	<key>StandardErrorPath</key>
+	<string>__AGENT_HOME__/agent.log</string>
+</dict>
+</plist>

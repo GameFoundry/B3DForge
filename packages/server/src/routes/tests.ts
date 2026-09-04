@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { promises as fs } from 'fs';
-import { DEFAULT_SNAPSHOT_CATEGORY } from '@banshee-forge/shared';
+import { DEFAULT_SNAPSHOT_CATEGORY, DEFAULT_PLATFORM } from '@banshee-forge/shared';
 import { TestResultsService } from '../services/test-results-service.js';
 import { ImageComparisonService } from '../services/image-comparison-service.js';
 import { TestResultsRepository } from '../repositories/test-results-repository.js';
@@ -62,7 +62,8 @@ export function createTestRoutes(
 				const build = await buildRepo.findById(projectSlug, buildId);
 				if (build) {
 					const configurationId = build.configurationId || 'default';
-					const manifest = await referenceRepository.getManifest(projectSlug, configurationId);
+					const platform = build.platform ?? DEFAULT_PLATFORM;
+					const manifest = await referenceRepository.getManifest(projectSlug, configurationId, platform);
 
 					await Promise.all(snapshotTests.results.map(async (snapshot) => {
 						if (snapshot.statusText === 'crashed' || !snapshot.screenshotPath)
@@ -79,7 +80,7 @@ export function createTestRoutes(
 							if (!screenshotPath) return;
 
 							const referencePath = referenceRepository.getReferenceImagePath(
-								projectSlug, configurationId, category, snapshot.testName
+								projectSlug, configurationId, platform, category, snapshot.testName
 							);
 
 							const [screenshotStat, referenceStat] = await Promise.all([
@@ -288,9 +289,10 @@ export function createTestRoutes(
 			}
 
 			const configurationId = build.configurationId || 'default';
+			const platform = build.platform ?? DEFAULT_PLATFORM;
 
 			// Check if reference exists
-			const hasReference = await referenceRepository.hasReference(projectSlug, configurationId, category, testName);
+			const hasReference = await referenceRepository.hasReference(projectSlug, configurationId, platform, category, testName);
 			if (!hasReference) {
 				res.json({
 					hasReference: false,
@@ -308,7 +310,7 @@ export function createTestRoutes(
 				return;
 			}
 
-			const referencePath = referenceRepository.getReferenceImagePath(projectSlug, configurationId, category, testName);
+			const referencePath = referenceRepository.getReferenceImagePath(projectSlug, configurationId, platform, category, testName);
 			const diffPath = await testResultsRepository.resolveSnapshotFilePath(
 				projectSlug, buildId, category, testName, 'diff.png'
 			);

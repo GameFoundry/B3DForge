@@ -1,2 +1,5 @@
 packages:
   - 'packages/*'
+# esbuild's postinstall must run for vite to work; pnpm >= 10 blocks it unless allowed here.
+allowBuilds:
+  esbuild: true

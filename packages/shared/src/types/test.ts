@@ -113,6 +113,8 @@ export interface ComparisonResult {
 export interface ReferenceInfo {
   testName: string;
   category: string;
+  /** Target platform the reference was captured on. Absent in pre-platform manifests. */
+  platform?: string;
   /** Path relative to the configuration's reference directory: "{category}/{testName}.png" */
   path: string;
   updatedAt: string;

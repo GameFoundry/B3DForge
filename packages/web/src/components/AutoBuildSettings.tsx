@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import type { Project, WatchedRepository } from '@banshee-forge/shared';
+import type { Project, WatchedRepository, PollingTarget } from '@banshee-forge/shared';
+import { DEFAULT_PLATFORM, PLATFORMS } from '@banshee-forge/shared';
 import { useUpdateProject, usePollingStatus, usePollNow } from '../hooks/useProjects';
+import { PlatformSelector } from './PlatformSelector';
 
 interface AutoBuildSettingsProps {
   project: Project;
@@ -87,20 +89,35 @@ export function AutoBuildSettings({ project }: AutoBuildSettingsProps) {
     pollNow.mutate(project.slug);
   };
 
-  // Resolved list of configuration IDs that polling should launch. Falls
-  // back to the default configuration when the project has not been
-  // configured yet (matches server-side behavior).
-  const selectedPollingIds: string[] = project.pollingConfigurationIds
-    ?? (project.defaultConfigurationId ? [project.defaultConfigurationId] : []);
+  // Resolved configuration/platform pairs that polling should launch. Falls
+  // back to the default configuration on the default platform when the
+  // project has not been configured yet (matches server-side behavior).
+  const pollingTargets: PollingTarget[] = project.pollingTargets
+    ?? (project.defaultConfigurationId
+      ? [{ configurationId: project.defaultConfigurationId, platforms: [DEFAULT_PLATFORM] }]
+      : []);
 
-  const handleTogglePollingConfig = (configId: string, checked: boolean) => {
-    const next = checked
-      ? Array.from(new Set([...selectedPollingIds, configId]))
-      : selectedPollingIds.filter(id => id !== configId);
+  const savePollingTargets = (next: PollingTarget[]) => {
     updateProject.mutate({
       slug: project.slug,
-      input: { pollingConfigurationIds: next },
+      input: { pollingTargets: next },
     });
+  };
+
+  const handleTogglePollingConfig = (configId: string, checked: boolean) => {
+    const config = project.configurations.find(c => c.id === configId);
+    const defaultPlatforms = config?.platforms?.length ? config.platforms : [DEFAULT_PLATFORM];
+    const next = checked
+      ? [...pollingTargets.filter(t => t.configurationId !== configId), { configurationId: configId, platforms: defaultPlatforms }]
+      : pollingTargets.filter(t => t.configurationId !== configId);
+    savePollingTargets(next);
+  };
+
+  const handlePollingPlatformsChange = (configId: string, platforms: string[]) => {
+    const next = platforms.length === 0
+      ? pollingTargets.filter(t => t.configurationId !== configId)
+      : pollingTargets.map(t => t.configurationId === configId ? { ...t, platforms } : t);
+    savePollingTargets(next);
   };
 
   return (
@@ -134,31 +151,45 @@ export function AutoBuildSettings({ project }: AutoBuildSettingsProps) {
       <div className="bg-gray-800 rounded-lg p-4">
         <h3 className="text-sm font-medium text-gray-200">Configurations to Build</h3>
         <p className="text-xs text-gray-400 mt-1 mb-3">
-          When polling detects new commits, builds are launched for the configurations checked below.
+          When polling detects new commits, one build is launched per checked platform of each checked configuration.
         </p>
         {project.configurations.length === 0 ? (
           <p className="text-sm text-gray-500">No configurations defined.</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {project.configurations.map(config => {
               const isDefault = config.id === project.defaultConfigurationId;
-              const isChecked = selectedPollingIds.includes(config.id);
+              const target = pollingTargets.find(t => t.configurationId === config.id);
+              const supported = config.platforms?.length ? config.platforms : PLATFORMS.map(p => p.id);
               return (
-                <label key={config.id} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={e => handleTogglePollingConfig(config.id, e.target.checked)}
-                    disabled={updateProject.isPending}
-                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
-                  />
-                  <span className="text-sm text-gray-200">{config.name}</span>
-                  {isDefault && (
-                    <span className="text-xs px-2 py-0.5 bg-blue-900/50 text-blue-300 rounded">
-                      Default
-                    </span>
+                <div key={config.id}>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!target}
+                      onChange={e => handleTogglePollingConfig(config.id, e.target.checked)}
+                      disabled={updateProject.isPending}
+                      className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500"
+                    />
+                    <span className="text-sm text-gray-200">{config.name}</span>
+                    {isDefault && (
+                      <span className="text-xs px-2 py-0.5 bg-blue-900/50 text-blue-300 rounded">
+                        Default
+                      </span>
+                    )}
+                  </label>
+                  {target && (
+                    <div className="ml-6 mt-1">
+                      <PlatformSelector
+                        value={target.platforms}
+                        onChange={platforms => handlePollingPlatformsChange(config.id, platforms)}
+                        allowed={supported}
+                        disabled={updateProject.isPending}
+                        compact
+                      />
+                    </div>
                   )}
-                </label>
+                </div>
               );
             })}
           </div>

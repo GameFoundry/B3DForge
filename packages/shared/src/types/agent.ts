@@ -18,6 +18,11 @@ export interface AgentRegistration {
 	platform: AgentPlatform;
 	arch: AgentArch;
 	hostname: string;
+	/**
+	 * Target platforms this agent can build (ids from `platforms.json`). Independent of
+	 * {@link platform}: a Windows agent may service `win32` and `ps5`. Defaults to the host OS id.
+	 */
+	platforms: string[];
 	/** Free-form labels used for build-to-agent matching (e.g. ["gpu-nvidia", "high-mem"]). */
 	labels: string[];
 	/** Maximum number of builds this agent will run concurrently. */
@@ -33,6 +38,14 @@ export interface AgentStatus {
 	activeBuildIds: string[];
 	/** Optional CPU load average (0..1). May be omitted if the agent doesn't track it. */
 	cpuLoad?: number;
+	/**
+	 * Whether the agent is willing to accept new builds right now. Omitted means available.
+	 * A macOS agent reports false while another user owns the console; builds then stay
+	 * queued rather than being dispatched.
+	 */
+	available?: boolean;
+	/** Human-readable reason when {@link available} is false. */
+	unavailableReason?: string;
 }
 
 /**
@@ -45,6 +58,45 @@ export interface AgentInfo extends AgentRegistration {
 	connectedAt: string;
 	lastSeenAt: string;
 	activeBuildIds: string[];
+	available: boolean;
+	unavailableReason?: string;
+}
+
+/**
+ * An agent the orchestrator has seen at least once, persisted so the UI can offer its platforms
+ * for builds while it is offline (e.g. a laptop that is asleep). Keyed by agent name; updated on
+ * every registration.
+ */
+export interface KnownAgent {
+	name: string;
+	platform: AgentPlatform;
+	arch: AgentArch;
+	hostname: string;
+	platforms: string[];
+	labels: string[];
+	firstSeenAt: string;
+	lastSeenAt: string;
+}
+
+/** Connection state of a target platform, derived from live and known agents. */
+export type PlatformAvailabilityStatus = 'connected' | 'offline' | 'never-seen';
+
+/** Per-agent detail inside {@link PlatformAvailability}. */
+export interface PlatformAgentState {
+	name: string;
+	connected: boolean;
+	/** Only meaningful when connected. */
+	available: boolean;
+	unavailableReason?: string;
+	lastSeenAt: string;
+}
+
+/** A platform from `platforms.json` together with the agents able to build it. */
+export interface PlatformAvailability {
+	id: string;
+	label: string;
+	status: PlatformAvailabilityStatus;
+	agents: PlatformAgentState[];
 }
 
 /**

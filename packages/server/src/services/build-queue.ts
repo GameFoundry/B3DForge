@@ -44,6 +44,18 @@ export class BuildQueue extends EventEmitter {
 		if (!this.paused) this.emit('queue:enqueued', job);
 	}
 
+	/**
+	 * Record why a pending build could not be dispatched. Broadcast with the queue status so the
+	 * UI can show what a build is waiting for. A no-op when the reason is unchanged, so the
+	 * dispatcher can call this on every pass without spamming `queue:updated`.
+	 */
+	setPendingReason(buildId: string, reason: string | undefined): void {
+		const job = this.queue.find(j => j.buildId === buildId);
+		if (!job || job.pendingReason === reason) return;
+		job.pendingReason = reason;
+		this.emitQueueUpdate();
+	}
+
 	/** Remove a still-pending build from the queue. Returns true if it was present. */
 	dequeue(buildId: string): boolean {
 		const index = this.queue.findIndex(j => j.buildId === buildId);

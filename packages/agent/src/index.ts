@@ -6,6 +6,8 @@ import { BuildExecutor } from './build-executor.js';
 import { WorkspaceCleanup } from './workspace-cleanup.js';
 import { ArtifactStore } from './artifact-store.js';
 import { uploadResults } from './results-uploader.js';
+import { AvailabilityMonitor } from './availability.js';
+import { SleepInhibitor } from './power.js';
 
 const VERSION = '0.1.0';
 
@@ -14,7 +16,8 @@ async function main(): Promise<void> {
 	console.log(`BansheeForge agent starting`);
 	console.log(`  Orchestrator: ${config.orchestratorUrl}`);
 	console.log(`  Name:         ${config.name}`);
-	console.log(`  Platform:     ${config.platform}/${config.arch}`);
+	console.log(`  Host:         ${config.platform}/${config.arch}`);
+	console.log(`  Platforms:    ${config.platforms.join(', ')}`);
 	console.log(`  Labels:       ${config.labels.join(', ') || '(none)'}`);
 	console.log(`  Concurrency:  ${config.maxParallelBuilds}`);
 	console.log(`  Workspace:    ${config.workspaceRoot}`);
@@ -22,6 +25,29 @@ async function main(): Promise<void> {
 
 	const client = new OrchestratorClient(config.orchestratorUrl, config.token);
 	const activeExecutors = new Map<string, BuildExecutor>();
+
+	// Availability gating (macOS: only while this user owns the console) and a sleep assertion
+	// while builds run. Both feed the status heartbeat the dispatcher matches against.
+	const availability = new AvailabilityMonitor();
+	const sleepInhibitor = new SleepInhibitor();
+	const sendStatus = () => {
+		// Hold the sleep assertion exactly while builds are active (including result upload).
+		if (activeExecutors.size > 0) sleepInhibitor.acquire();
+		else sleepInhibitor.release();
+
+		if (!client.isRegistered) return;
+		const { available, reason } = availability.value;
+		client.sendStatus({
+			activeBuildIds: Array.from(activeExecutors.keys()),
+			available,
+			...(available ? {} : { unavailableReason: reason }),
+		});
+	};
+	availability.on('changed', ({ available, reason }) => {
+		console.log(available ? 'Agent available' : `Agent unavailable: ${reason}`);
+		sendStatus();
+	});
+	availability.start();
 
 	const cleanup = new WorkspaceCleanup({ workspaceRoot: config.workspaceRoot });
 	setInterval(() => {
@@ -49,6 +75,7 @@ async function main(): Promise<void> {
 			platform: config.platform,
 			arch: config.arch,
 			hostname: config.hostname,
+			platforms: config.platforms,
 			labels: config.labels,
 			maxParallelBuilds: config.maxParallelBuilds,
 			version: VERSION,
@@ -59,6 +86,8 @@ async function main(): Promise<void> {
 		if (response.ok) {
 			console.log(`Registered (agentId=${response.agentId})`);
 			client.markRegistered();
+			// Report availability straight away so an unavailable agent never receives work.
+			sendStatus();
 		} else {
 			console.error(`Registration rejected: ${response.error}`);
 			process.exit(1);
@@ -76,7 +105,7 @@ async function main(): Promise<void> {
 	});
 
 	client.on('build:assign', (assignment) => {
-		runBuild(assignment, config, client, activeExecutors).catch(err => {
+		runBuild(assignment, config, client, activeExecutors, sendStatus).catch(err => {
 			console.error(`Build ${assignment.build.id} crashed:`, err);
 		});
 	});
@@ -90,16 +119,14 @@ async function main(): Promise<void> {
 	});
 
 	// Periodic heartbeat so the orchestrator notices missed updates.
-	setInterval(() => {
-		if (client.isRegistered) {
-			client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });
-		}
-	}, 10_000).unref();
+	setInterval(sendStatus, 10_000).unref();
 
 	// Graceful shutdown.
 	const shutdown = (signal: string) => {
 		console.log(`Received ${signal}, shutting down`);
 		for (const executor of activeExecutors.values()) executor.kill();
+		availability.stop();
+		sleepInhibitor.release();
 		client.disconnect();
 		setTimeout(() => process.exit(0), 1000).unref();
 	};
@@ -112,6 +139,7 @@ async function runBuild(
 	config: AgentConfig,
 	client: OrchestratorClient,
 	activeExecutors: Map<string, BuildExecutor>,
+	sendStatus: () => void,
 ): Promise<void> {
 	const buildId = assignment.build.id;
 	console.log(`Starting build ${buildId} (${assignment.project.slug})`);
@@ -124,7 +152,7 @@ async function runBuild(
 		logBufferIntervalMs: 100,
 	});
 	activeExecutors.set(buildId, executor);
-	client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });
+	sendStatus();
 
 	executor.on('log', (lines) => {
 		client.sendLog({ buildId, lines });
@@ -165,7 +193,7 @@ async function runBuild(
 				snapshotCategories: executor.getSnapshotCategories(),
 			});
 			activeExecutors.delete(buildId);
-			client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });
+			sendStatus();
 			console.log(`Build ${buildId} ${status} (exit ${exitCode})`);
 		};
 		finalize().catch(err => console.error(`Finalize failed for build ${buildId}:`, err));
@@ -173,7 +201,7 @@ async function runBuild(
 	executor.on('error', (code, message) => {
 		client.sendError({ buildId, code, message });
 		activeExecutors.delete(buildId);
-		client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });
+		sendStatus();
 		console.error(`Build ${buildId} error [${code}]: ${message}`);
 	});
 
@@ -183,7 +211,7 @@ async function runBuild(
 		const message = err instanceof Error ? err.message : String(err);
 		client.sendError({ buildId, code: 'EXECUTION_FAILED', message });
 		activeExecutors.delete(buildId);
-		client.sendStatus({ activeBuildIds: Array.from(activeExecutors.keys()) });
+		sendStatus();
 	}
 }
 

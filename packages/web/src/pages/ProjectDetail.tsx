@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { CreateBuildInput } from '@banshee-forge/shared';
+import { getPlatformLabel } from '@banshee-forge/shared';
 import { useProject } from '../hooks/useProjects';
 import { useBuilds, useTriggerBuild } from '../hooks/useBuilds';
 import { useBuildsUpdates } from '../hooks/useBuildsUpdates';
+import { useQueueStatus } from '../hooks/useQueueStatus';
 import { BuildStatusBadge } from '../components/BuildStatusBadge';
 import { TriggerBuildModal } from '../components/TriggerBuildModal';
 import { ConfigurationList } from '../components/ConfigurationList';
@@ -19,6 +21,8 @@ export function ProjectDetail() {
 
   // Listen for build status updates to refresh the list
   useBuildsUpdates(slug);
+  // Queue status carries the reason a pending build is still waiting (e.g. agent offline)
+  const { data: queueStatus } = useQueueStatus();
 
   if (projectLoading) {
     return (
@@ -187,6 +191,7 @@ export function ProjectDetail() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">#</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Config</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Platform</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Commit</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Trigger</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Duration</th>
@@ -195,7 +200,11 @@ export function ProjectDetail() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-700">
-                {buildsData.items.map((build) => (
+                {buildsData.items.map((build) => {
+                  const pendingReason = build.status === 'pending'
+                    ? queueStatus?.queue.find(job => job.buildId === build.id)?.pendingReason
+                    : undefined;
+                  return (
                   <tr key={build.id} className="hover:bg-gray-700/50 transition-colors">
                     <td className="px-4 py-3">
                       <Link to={`/builds/${build.id}`} className="text-blue-400 hover:underline font-medium">
@@ -211,9 +220,17 @@ export function ProjectDetail() {
                           </span>
                         )}
                       </div>
+                      {pendingReason && (
+                        <p className="text-xs text-yellow-400/80 mt-1" title={pendingReason}>
+                          Waiting: {pendingReason}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-300">
                       {build.configurationName || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-300">
+                      {build.platform ? getPlatformLabel(build.platform) : '-'}
                     </td>
                     <td className="px-4 py-3 font-mono text-sm text-gray-300">
                       {build.gitCommit?.slice(0, 7) || '-'}
@@ -239,7 +256,8 @@ export function ProjectDetail() {
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
 

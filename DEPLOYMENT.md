@@ -85,6 +85,47 @@ to `true` once you put HTTPS in front.
 The CLI is also accessible as `pnpm cli ...` from the repo root, e.g.
 `pnpm cli user list`.
 
+## macOS build agent
+
+The macOS agent runs as a launchd *user* agent inside your GUI session (Metal needs a window
+server session) and reports itself **unavailable while another user owns the screen**. Builds
+for `darwin` queued while the machine is asleep or in use simply wait on the server until the
+agent reconnects and becomes available, so it is fine to trigger them at any time.
+
+Prerequisites (Homebrew):
+
+```bash
+brew install node bash cmake ninja
+```
+
+Homebrew bash is required: the system bash 3.2 cannot run the CI test script (associative
+arrays). The agent prefers `/opt/homebrew/bin/bash` automatically.
+
+Install:
+
+```bash
+# On the server: create a token for the agent machine
+./bsf-cli.sh agent-token create macbook
+
+# On the agent machine, from a checkout with `pnpm install && pnpm build` done:
+cd Framework/Tools/BansheeForge
+./packages/agent/macos/install-macos-agent.sh https://forge.example.com bsf_agt_... macbook
+```
+
+This writes `~/.bansheeforge-agent/agent.json`, installs
+`~/Library/LaunchAgents/com.bansheeforge.agent.plist`, and starts the agent. Logs go to
+`~/.bansheeforge-agent/agent.log`. Re-run the script after rebuilding or changing the config.
+
+Behaviour to know about:
+
+- The agent services the `darwin` platform by default (`BSF_AGENT_PLATFORMS` / `"platforms"` in
+  `agent.json` override this; a Windows agent that also builds PS5 sets `win32,ps5`).
+- While a build runs the agent holds a `caffeinate -s -i` assertion, so closing the lid on AC
+  power does not interrupt it. On battery the OS may still sleep.
+- With the lid closed and no build running the laptop sleeps and the agent disconnects. The
+  Agents page lists it under *Offline agents* and its platform stays selectable in Trigger Build.
+- Enable auto-login for the agent's user so the agent comes back after a reboot.
+
 ## 1. First-run user setup
 
 After installing dependencies and building (`pnpm install && pnpm build`), the

@@ -50,7 +50,10 @@ export interface ExecutorConfig {
 	maxLogBatchBytes: number;
 	/** Maximum size (bytes) of a single log line's message before it is truncated. */
 	maxLogLineBytes: number;
-	/** Optional explicit path to bash. On Windows defaults to Git Bash; on POSIX defaults to `bash`. */
+	/**
+	 * Optional explicit path to bash. On Windows defaults to Git Bash; on macOS to Homebrew bash
+	 * when installed (system bash 3.2 cannot run the CI scripts); elsewhere to `bash`.
+	 */
 	bashPath?: string;
 }
 
@@ -71,7 +74,7 @@ const DEFAULT_CONFIG: ExecutorConfig = {
 	logBufferIntervalMs: 100,
 	maxLogBatchBytes: 512 * 1024,
 	maxLogLineBytes: 128 * 1024,
-	bashPath: IS_WINDOWS ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash',
+	bashPath: IS_WINDOWS ? 'C:\\Program Files\\Git\\bin\\bash.exe' : undefined,
 };
 
 export class BuildExecutor extends EventEmitter {
@@ -156,6 +159,11 @@ export class BuildExecutor extends EventEmitter {
 			BUILD_ID: build.id,
 			CONFIGURATION_ID: configuration?.id ?? '',
 			CONFIGURATION_NAME: configuration?.name ?? 'default',
+			// Target platform the build is for (win32/darwin/linux/ps5) versus the OS running the
+			// scripts. Scripts branch on PLATFORM; HOST_PLATFORM matters when they differ (e.g. ps5).
+			PLATFORM: build.platform ?? process.platform,
+			HOST_PLATFORM: process.platform,
+			ARCH: process.arch,
 			BUILD_TYPE: configuration?.buildType ?? '',
 			CLEAN_BUILD: shouldClean ? '1' : '0',
 			WORKSPACE: this.toUnixPath(workspace),
@@ -387,8 +395,13 @@ export class BuildExecutor extends EventEmitter {
 			return 'bash';
 		}
 
-		// POSIX: prefer absolute, otherwise rely on PATH lookup by spawn.
-		for (const candidate of ['/bin/bash', '/usr/bin/bash', '/usr/local/bin/bash']) {
+		// POSIX: prefer absolute, otherwise rely on PATH lookup by spawn. On macOS the system
+		// bash is 3.2, which lacks the associative arrays the CI scripts use, so a Homebrew bash
+		// (Apple Silicon and Intel prefixes) is preferred when installed.
+		const candidates = process.platform === 'darwin'
+			? ['/opt/homebrew/bin/bash', '/usr/local/bin/bash', '/bin/bash']
+			: ['/bin/bash', '/usr/bin/bash', '/usr/local/bin/bash'];
+		for (const candidate of candidates) {
 			try { await fs.access(candidate); return candidate; } catch { /* try next */ }
 		}
 		return 'bash';

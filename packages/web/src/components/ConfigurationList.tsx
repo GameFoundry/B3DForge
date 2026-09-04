@@ -16,6 +16,7 @@ import {
   useUpdateProject,
 } from '../hooks/useProjects';
 import { ScriptEditor } from './ScriptEditor';
+import { PlatformSelector } from './PlatformSelector';
 
 interface ConfigurationListProps {
   project: Project;
@@ -138,7 +139,7 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
   const [description, setDescription] = useState('');
   const [buildType, setBuildType] = useState('RelWithDebInfo');
   const [forceCleanBuild, setForceCleanBuild] = useState(false);
-  const [platform, setPlatform] = useState<'any' | 'win32' | 'linux' | 'darwin'>('any');
+  const [platforms, setPlatforms] = useState<string[]>([]);
   const [labelsText, setLabelsText] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -150,7 +151,7 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
       buildScript: { source: 'local' },
       buildType: buildType || undefined,
       forceCleanBuild,
-      platform,
+      platforms,
       requiredLabels: requiredLabels.length ? requiredLabels : undefined,
     });
   };
@@ -215,19 +216,10 @@ function CreateConfigurationForm({ onSubmit, onCancel, isLoading }: CreateConfig
       </label>
 
       <div>
-        <label className="block text-sm text-gray-400 mb-1">Required platform</label>
-        <select
-          value={platform}
-          onChange={(e) => setPlatform(e.target.value as typeof platform)}
-          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="any">Any platform</option>
-          <option value="win32">Windows</option>
-          <option value="linux">Linux</option>
-          <option value="darwin">macOS</option>
-        </select>
+        <label className="block text-sm text-gray-400 mb-1">Supported platforms</label>
+        <PlatformSelector value={platforms} onChange={setPlatforms} compact />
         <p className="text-xs text-gray-500 mt-1">
-          Builds run only on agents matching this platform.
+          Platforms this configuration can be built for. Leave all unchecked to allow every platform.
         </p>
       </div>
 
@@ -302,9 +294,7 @@ function ConfigurationItem({
   const [buildType, setBuildType] = useState(configuration.buildType ?? '');
   const [gitBranch, setGitBranch] = useState(configuration.gitBranch ?? '');
   const [forceCleanBuild, setForceCleanBuild] = useState(configuration.forceCleanBuild ?? false);
-  const [platform, setPlatform] = useState<'any' | 'win32' | 'linux' | 'darwin'>(
-    (configuration.platform as 'any' | 'win32' | 'linux' | 'darwin') ?? 'any'
-  );
+  const [platforms, setPlatforms] = useState<string[]>(configuration.platforms ?? []);
   const [labelsText, setLabelsText] = useState((configuration.requiredLabels ?? []).join(', '));
 
   // Script hooks
@@ -325,7 +315,7 @@ function ConfigurationItem({
       buildType: buildType || undefined,
       gitBranch: gitBranch.trim(),
       forceCleanBuild,
-      platform,
+      platforms,
       requiredLabels: requiredLabels.length ? requiredLabels : [],
     });
   };
@@ -513,17 +503,11 @@ function ConfigurationItem({
                 </div>
               </label>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Required platform</label>
-                <select
-                  value={platform}
-                  onChange={(e) => setPlatform(e.target.value as typeof platform)}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
-                >
-                  <option value="any">Any platform</option>
-                  <option value="win32">Windows</option>
-                  <option value="linux">Linux</option>
-                  <option value="darwin">macOS</option>
-                </select>
+                <label className="block text-sm text-gray-400 mb-1">Supported platforms</label>
+                <PlatformSelector value={platforms} onChange={setPlatforms} compact />
+                <p className="text-xs text-gray-500 mt-1">
+                  Leave all unchecked to allow every platform.
+                </p>
               </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Required agent labels</label>

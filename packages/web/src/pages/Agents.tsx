@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { io as createSocket, Socket } from 'socket.io-client';
-import type { AgentInfo } from '@banshee-forge/shared';
-import { agentsApi } from '../api/client';
+import type { AgentInfo, KnownAgent } from '@banshee-forge/shared';
+import { getPlatformLabel } from '@banshee-forge/shared';
+import { agentsApi, platformsApi } from '../api/client';
 import { AgentArtifacts } from '../components/AgentArtifacts';
+import { useKnownAgents } from '../hooks/usePlatforms';
 
 export function Agents() {
 	const queryClient = useQueryClient();
@@ -13,6 +15,7 @@ export function Agents() {
 		refetchInterval: 30_000,
 	});
 
+	const { data: knownAgents } = useKnownAgents();
 	const [socket, setSocket] = useState<Socket | null>(null);
 	useEffect(() => {
 		const s = createSocket({ withCredentials: true });
@@ -45,6 +48,18 @@ export function Agents() {
 	}
 
 	const agents = data?.agents ?? [];
+	const offlineAgents = (knownAgents ?? []).filter(known => !agents.some(a => a.name === known.name));
+
+	const handleForget = async (known: KnownAgent) => {
+		if (!confirm(`Forget agent "${known.name}"? Its platforms will no longer be offered while it is offline.`)) return;
+		try {
+			await platformsApi.forgetAgent(known.name);
+			queryClient.invalidateQueries({ queryKey: ['known-agents'] });
+			queryClient.invalidateQueries({ queryKey: ['platforms'] });
+		} catch (err) {
+			console.error('Failed to forget agent:', err);
+		}
+	};
 
 	return (
 		<div className="space-y-6">
@@ -68,9 +83,11 @@ export function Agents() {
 						<thead className="bg-gray-900/50 text-left text-xs uppercase tracking-wider text-gray-400">
 							<tr>
 								<th className="px-4 py-3">Name</th>
-								<th className="px-4 py-3">Platform</th>
+								<th className="px-4 py-3">Host</th>
+								<th className="px-4 py-3">Builds for</th>
 								<th className="px-4 py-3">Hostname</th>
 								<th className="px-4 py-3">Labels</th>
+								<th className="px-4 py-3">State</th>
 								<th className="px-4 py-3">Active</th>
 								<th className="px-4 py-3">Connected</th>
 								<th className="px-4 py-3">Artifacts</th>
@@ -81,11 +98,19 @@ export function Agents() {
 								<tr key={agent.id} className="text-gray-200">
 									<td className="px-4 py-3 font-medium">{agent.name}</td>
 									<td className="px-4 py-3 font-mono text-xs">{agent.platform}/{agent.arch}</td>
+									<td className="px-4 py-3 text-xs">{agent.platforms.map(getPlatformLabel).join(', ')}</td>
 									<td className="px-4 py-3 font-mono text-xs">{agent.hostname}</td>
 									<td className="px-4 py-3 text-xs">
 										{agent.labels.length === 0
 											? <span className="text-gray-500">—</span>
 											: agent.labels.join(', ')}
+									</td>
+									<td className="px-4 py-3 text-xs">
+										{agent.available
+											? <span className="px-1.5 py-0.5 rounded bg-green-900/40 text-green-300">available</span>
+											: <span className="px-1.5 py-0.5 rounded bg-yellow-900/40 text-yellow-300" title={agent.unavailableReason}>
+												{agent.unavailableReason ?? 'unavailable'}
+											</span>}
 									</td>
 									<td className="px-4 py-3">
 										{agent.activeBuildIds.length} / {agent.maxParallelBuilds}
@@ -100,6 +125,48 @@ export function Agents() {
 							))}
 						</tbody>
 					</table>
+				</div>
+			)}
+
+			{offlineAgents.length > 0 && (
+				<div>
+					<h2 className="text-lg font-semibold text-gray-100">Offline agents</h2>
+					<p className="text-gray-400 text-sm mt-1 mb-3">
+						Agents seen before but not connected now. Builds for their platforms can still be queued and wait until they reconnect.
+					</p>
+					<div className="bg-gray-800 rounded-lg overflow-hidden">
+						<table className="w-full text-sm">
+							<thead className="bg-gray-900/50 text-left text-xs uppercase tracking-wider text-gray-400">
+								<tr>
+									<th className="px-4 py-3">Name</th>
+									<th className="px-4 py-3">Host</th>
+									<th className="px-4 py-3">Builds for</th>
+									<th className="px-4 py-3">Hostname</th>
+									<th className="px-4 py-3">Last seen</th>
+									<th className="px-4 py-3"></th>
+								</tr>
+							</thead>
+							<tbody className="divide-y divide-gray-700">
+								{offlineAgents.map(known => (
+									<tr key={known.name} className="text-gray-300">
+										<td className="px-4 py-3 font-medium">{known.name}</td>
+										<td className="px-4 py-3 font-mono text-xs">{known.platform}/{known.arch}</td>
+										<td className="px-4 py-3 text-xs">{known.platforms.map(getPlatformLabel).join(', ')}</td>
+										<td className="px-4 py-3 font-mono text-xs">{known.hostname}</td>
+										<td className="px-4 py-3 text-xs text-gray-400">{new Date(known.lastSeenAt).toLocaleString()}</td>
+										<td className="px-4 py-3 text-right">
+											<button
+												onClick={() => handleForget(known)}
+												className="text-xs text-gray-400 hover:text-red-400"
+											>
+												Forget
+											</button>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
 				</div>
 			)}
 		</div>

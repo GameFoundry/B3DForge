@@ -8,6 +8,8 @@ export interface AgentConfig {
 	token: string;
 	name: string;
 	labels: string[];
+	/** Target platforms this agent services (ids from `platforms.json`). Defaults to the host OS id. */
+	platforms: string[];
 	maxParallelBuilds: number;
 	platform: AgentPlatform;
 	arch: AgentArch;
@@ -24,6 +26,7 @@ export interface PartialAgentConfigFile {
 	token?: string;
 	name?: string;
 	labels?: string[];
+	platforms?: string[];
 	maxParallelBuilds?: number;
 	workspaceRoot?: string;
 	buildsRoot?: string;
@@ -35,7 +38,9 @@ export interface PartialAgentConfigFile {
  * Load agent configuration from (in order of precedence): environment variables, the JSON file at
  * `BSF_AGENT_CONFIG` (if set), or `agent.json` in the current working directory if it exists.
  *
- * Required fields are `orchestratorUrl` and `token`. Throws if either is missing.
+ * Required fields are `orchestratorUrl` and `token`. Throws if either is missing. Target
+ * platforms come from `BSF_AGENT_PLATFORMS` (comma-separated) and default to the host OS id, so
+ * a plain Windows agent services `win32` and a PS5 agent must opt in with `BSF_AGENT_PLATFORMS=ps5`.
  */
 export async function loadConfig(): Promise<AgentConfig> {
 	const fileConfig = await readConfigFile();
@@ -44,6 +49,7 @@ export async function loadConfig(): Promise<AgentConfig> {
 	const token = (process.env.BSF_AGENT_TOKEN ?? fileConfig.token ?? '').trim();
 	const name = (process.env.BSF_AGENT_NAME ?? fileConfig.name ?? defaultName()).trim();
 	const labels = parseLabels(process.env.BSF_AGENT_LABELS) ?? fileConfig.labels ?? [];
+	const platforms = parseLabels(process.env.BSF_AGENT_PLATFORMS) ?? fileConfig.platforms ?? [];
 	const maxParallelBuilds = Math.max(1, parseInt(
 		process.env.BSF_AGENT_MAX_PARALLEL ?? '',
 		10,
@@ -77,6 +83,7 @@ export async function loadConfig(): Promise<AgentConfig> {
 		token,
 		name,
 		labels,
+		platforms: platforms.length ? platforms : [process.platform],
 		maxParallelBuilds,
 		platform: process.platform as AgentPlatform,
 		arch: process.arch as AgentArch,

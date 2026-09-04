@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import type { CreateBuildInput, PaginatedResponse, BuildSummary } from '@banshee-forge/shared';
+import type { Build, CreateBuildInput, PaginatedResponse, BuildSummary, TriggerBuildResponse } from '@banshee-forge/shared';
+import { isKnownPlatform } from '@banshee-forge/shared';
+import { resolveConfigurationPlatforms } from '../services/configuration-platforms.js';
 import { BuildRepository } from '../repositories/build-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { BuildOrchestrator } from '../services/build-orchestrator.js';
@@ -39,7 +41,7 @@ export function createBuildRoutes(
     }
   });
 
-  // POST /api/v1/projects/:slug/builds - Trigger new build
+  // POST /api/v1/projects/:slug/builds - Trigger new builds (one per requested platform)
   router.post('/projects/:slug/builds', async (req, res, next) => {
     try {
       const project = await projectRepo.findBySlug(req.params.slug);
@@ -62,23 +64,43 @@ export function createBuildRoutes(
         return;
       }
 
+      // Resolve platforms: requested ones must be known and supported by the configuration.
+      const supported = resolveConfigurationPlatforms(configuration);
+      const platforms = input.platforms?.length ? input.platforms : supported;
+      const unknown = platforms.filter(p => !isKnownPlatform(p));
+      if (unknown.length > 0) {
+        res.status(400).json({ error: 'Bad request', message: `Unknown platform(s): ${unknown.join(', ')}` });
+        return;
+      }
+      const unsupported = platforms.filter(p => !supported.includes(p));
+      if (unsupported.length > 0) {
+        res.status(400).json({ error: 'Bad request', message: `Configuration does not support platform(s): ${unsupported.join(', ')}` });
+        return;
+      }
+
       // Use configuration's defaultConfig if available
       const defaultConfig = configuration?.defaultConfig ?? {};
       const configurationName = configuration?.name ?? 'default';
+      const priority = (input as { priority?: number }).priority ?? 0;
 
-      const build = await buildRepo.create(req.params.slug, {
-        ...input,
-        configurationId: configurationId ?? '',
-        gitBranch: input.gitBranch || configuration?.gitBranch || project.gitBranch,
-        config: input.config ?? defaultConfig,
-      }, 'manual', configurationName);
+      const builds: Build[] = [];
+      for (const platform of platforms) {
+        const build = await buildRepo.create(req.params.slug, {
+          ...input,
+          configurationId: configurationId ?? '',
+          gitBranch: input.gitBranch || configuration?.gitBranch || project.gitBranch,
+          config: input.config ?? defaultConfig,
+        }, 'manual', configurationName, platform);
 
-      // Trigger build execution via orchestrator
-      const priority = (input as any).priority ?? 0;
-      await orchestrator.triggerBuild(req.params.slug, build.id, priority);
+        // Trigger build execution via orchestrator
+        await orchestrator.triggerBuild(req.params.slug, build.id, priority);
 
-      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'build.trigger', target: `${req.params.slug}/${build.id}`, details: { configurationId: build.configurationId, configurationName } });
-      res.status(201).json(build);
+        auditLog?.append({ actor: AuditLog.actorOf(req), action: 'build.trigger', target: `${req.params.slug}/${build.id}`, details: { configurationId: build.configurationId, configurationName, platform } });
+        builds.push(build);
+      }
+
+      const response: TriggerBuildResponse = { builds };
+      res.status(201).json(response);
     } catch (error) {
       next(error);
     }

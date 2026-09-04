@@ -23,6 +23,8 @@ import { AgentRegistry } from './services/agent-registry.js';
 import { AgentDispatcher } from './services/agent-dispatcher.js';
 import { TestResultsRepository } from './repositories/test-results-repository.js';
 import { ReferenceRepository } from './repositories/reference-repository.js';
+import { KnownAgentsRepository } from './repositories/known-agents-repository.js';
+import { createPlatformRoutes } from './routes/platforms.js';
 import { UsersRepository } from './auth/users-repository.js';
 import { SessionsRepository } from './auth/sessions-repository.js';
 import { AgentTokensRepository } from './auth/agent-tokens-repository.js';
@@ -61,6 +63,7 @@ const projectRepo = new ProjectRepository(storage);
 const buildRepo = new BuildRepository(storage);
 const testResultsRepo = new TestResultsRepository(storage);
 const referenceRepo = new ReferenceRepository(storage, DATA_PATH);
+const knownAgentsRepo = new KnownAgentsRepository(storage);
 
 // Initialize auth repositories and middleware
 const usersRepo = new UsersRepository(storage);
@@ -143,6 +146,7 @@ app.use('/api/v1', requireUser);
 app.use('/api/v1/projects', createProjectRoutes(projectRepo, pollingService, auditLog));
 app.use('/api/v1', createBuildRoutes(buildRepo, projectRepo, orchestrator, auditLog));
 app.use('/api/v1', createAgentRoutes(agentRegistry, auditLog));
+app.use('/api/v1', createPlatformRoutes(agentRegistry, knownAgentsRepo, auditLog));
 app.use('/api/v1/agent-tokens', createAgentTokenRoutes(agentTokensRepo, auditLog));
 app.use('/api/v1/config', createConfigRoutes(configService, auditLog));
 app.use('/api/v1', createTestRoutes(
@@ -188,7 +192,7 @@ if (webClientExists) {
 }
 
 // Wire up the /agents namespace (bearer-token authed) for agent connections.
-setupAgentNamespace(io, agentTokensRepo, agentRegistry, agentDispatcher, orchestrator);
+setupAgentNamespace(io, agentTokensRepo, agentRegistry, agentDispatcher, orchestrator, knownAgentsRepo);
 
 // Authenticate every Socket.IO connection via the session cookie
 io.use(async (socket, next) => {

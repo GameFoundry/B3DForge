@@ -52,12 +52,14 @@ export class AgentRegistry extends EventEmitter {
 			platform: registration.platform,
 			arch: registration.arch,
 			hostname: registration.hostname,
+			platforms: registration.platforms?.length ? [...registration.platforms] : [registration.platform],
 			labels: [...registration.labels],
 			maxParallelBuilds: Math.max(1, registration.maxParallelBuilds || 1),
 			version: registration.version,
 			connectedAt: now,
 			lastSeenAt: now,
 			activeBuildIds: [],
+			available: true,
 		};
 		const agent: RegisteredAgent = { info, socket, tokenId };
 		this.agents.set(id, agent);
@@ -78,11 +80,14 @@ export class AgentRegistry extends EventEmitter {
 		const agent = this.agents.get(agentId);
 		if (!agent) return null;
 		const wasFull = agent.info.activeBuildIds.length >= agent.info.maxParallelBuilds;
+		const wasAvailable = agent.info.available;
 		agent.info.activeBuildIds = [...status.activeBuildIds];
 		agent.info.lastSeenAt = new Date().toISOString();
+		agent.info.available = status.available ?? true;
+		agent.info.unavailableReason = agent.info.available ? undefined : status.unavailableReason;
 		this.emit('status-changed', agent);
 		const isFull = agent.info.activeBuildIds.length >= agent.info.maxParallelBuilds;
-		if (wasFull && !isFull) this.emit('available', agent);
+		if ((wasFull && !isFull) || (!wasAvailable && agent.info.available)) this.emit('available', agent);
 		return agent;
 	}
 
@@ -118,21 +123,43 @@ export class AgentRegistry extends EventEmitter {
 	}
 
 	/**
-	 * Find agents that match a configuration's platform + label requirements and have at least one
-	 * free slot. Returned in fewest-active-builds order so the dispatcher prefers idle agents first.
+	 * Find agents that service a build's target platform, carry every required label, report
+	 * themselves available, and have at least one free slot. Returned in fewest-active-builds
+	 * order so the dispatcher prefers idle agents first.
 	 */
-	findEligible(platform: string | undefined, requiredLabels: string[] | undefined): RegisteredAgent[] {
-		const wantPlatform = platform ?? 'any';
+	findEligible(platform: string, requiredLabels: string[] | undefined): RegisteredAgent[] {
 		const want = requiredLabels ?? [];
 		const eligible: RegisteredAgent[] = [];
 		for (const agent of this.agents.values()) {
+			if (!agent.info.available) continue;
 			if (agent.info.activeBuildIds.length >= agent.info.maxParallelBuilds) continue;
-			if (wantPlatform !== 'any' && agent.info.platform !== wantPlatform) continue;
+			if (!agent.info.platforms.includes(platform)) continue;
 			if (!want.every(label => agent.info.labels.includes(label))) continue;
 			eligible.push(agent);
 		}
 		eligible.sort((a, b) => a.info.activeBuildIds.length - b.info.activeBuildIds.length);
 		return eligible;
+	}
+
+	/**
+	 * Explain why no agent was eligible for a platform, for display on the queued build. Checks
+	 * the same conditions as {@link findEligible} in order of severity.
+	 */
+	describeIneligibility(platform: string, requiredLabels: string[] | undefined): string {
+		const want = requiredLabels ?? [];
+		const servicing = Array.from(this.agents.values()).filter(a => a.info.platforms.includes(platform));
+		if (servicing.length === 0) return `No connected agent can build ${platform}`;
+
+		const labelled = servicing.filter(a => want.every(label => a.info.labels.includes(label)));
+		if (labelled.length === 0) return `No connected ${platform} agent has labels: ${want.join(', ')}`;
+
+		const unavailable = labelled.filter(a => !a.info.available);
+		if (unavailable.length === labelled.length) {
+			const reason = unavailable[0].info.unavailableReason ?? 'agent unavailable';
+			return `Waiting for ${unavailable[0].info.name}: ${reason}`;
+		}
+
+		return `All ${platform} agents are busy`;
 	}
 
 	sendAssignment(agentId: string, payload: BuildAssignment): boolean {

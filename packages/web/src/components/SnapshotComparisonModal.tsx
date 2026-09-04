@@ -9,6 +9,8 @@ interface SnapshotComparisonModalProps {
 	testName: string;
 	projectSlug: string;
 	configurationId: string;
+	/** Target platform of the build; references are scoped per platform. */
+	platform: string;
 	/** Show the category next to the test name (used when a build has multiple categories) */
 	showCategory?: boolean;
 	onClose: () => void;
@@ -20,6 +22,7 @@ export function SnapshotComparisonModal({
 	testName,
 	projectSlug,
 	configurationId,
+	platform,
 	showCategory,
 	onClose,
 }: SnapshotComparisonModalProps) {
@@ -49,7 +52,7 @@ export function SnapshotComparisonModal({
 
 	const screenshotUrl = testsApi.getScreenshotUrl(buildId, category, testName);
 	const referenceUrl = comparison?.hasReference
-		? referencesApi.getReferenceUrl(projectSlug, configurationId, category, testName)
+		? referencesApi.getReferenceUrl(projectSlug, configurationId, platform, category, testName)
 		: undefined;
 	const diffUrl = comparison?.hasReference && comparison.diffImagePath
 		? testsApi.getDiffUrl(buildId, category, testName)
@@ -60,6 +63,7 @@ export function SnapshotComparisonModal({
 			await setReferenceMutation.mutateAsync({
 				projectSlug,
 				configId: configurationId,
+				platform,
 				category,
 				testName,
 				buildId,

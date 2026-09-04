@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { LogLine, BuildPhase, BuildStatus } from '@banshee-forge/shared';
+import { getPlatformLabel } from '@banshee-forge/shared';
 import { useBuild, useParsedBuildLog, useCancelBuild } from '../hooks/useBuilds';
 import { useBuildSocket } from '../hooks/useBuildSocket';
 import { useTestResults } from '../hooks/useTestResults';
@@ -246,6 +247,9 @@ export function BuildDetail() {
                 Incremental
               </span>
             )}
+            <span className="text-xs px-2 py-0.5 bg-gray-700 text-gray-200 rounded" title={`Platform: ${build.platform}`}>
+              {getPlatformLabel(build.platform)}
+            </span>
             {build.agentName && (
               <span className="text-xs px-2 py-0.5 bg-purple-900/50 text-purple-300 rounded" title={`Agent ID: ${build.agentId}`}>
                 on {build.agentName}
@@ -484,6 +488,7 @@ export function BuildDetail() {
                     buildId={build.id}
                     projectSlug={build.projectSlug}
                     configurationId={build.configurationId || 'default'}
+                    platform={build.platform}
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center h-48 text-gray-500">

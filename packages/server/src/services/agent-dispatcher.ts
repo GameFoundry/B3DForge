@@ -8,6 +8,7 @@ import type {
 	ScriptConfig,
 	ScriptPayload,
 } from '@banshee-forge/shared';
+import { DEFAULT_PLATFORM } from '@banshee-forge/shared';
 import { BuildQueue } from './build-queue.js';
 import { AgentRegistry, RegisteredAgent } from './agent-registry.js';
 import { BuildRepository } from '../repositories/build-repository.js';
@@ -30,8 +31,9 @@ interface Assignment {
  * passive; this is the only component that decides what runs where.
  *
  * Lifecycle: subscribe to `queue:enqueued` (new work) and `agent:available` (new capacity);
- * both call `tryDispatch()`. Each pending build is matched to an eligible agent (platform +
- * labels + free slot). When an agent reports back (log/phase/complete/error/disconnect),
+ * both call `tryDispatch()`. Each pending build is matched to an eligible agent (target
+ * platform + labels + availability + free slot). A build with no eligible agent stays queued
+ * indefinitely with a `pendingReason` explaining what it waits for. When an agent reports back (log/phase/complete/error/disconnect),
  * routing happens via the assignments map to the orchestrator's handlers.
  */
 export class AgentDispatcher {
@@ -89,11 +91,14 @@ export class AgentDispatcher {
 			? project.configurations?.find(c => c.id === build.configurationId)
 			: undefined;
 
-		const platform = configuration?.platform ?? 'any';
+		const platform = build.platform ?? DEFAULT_PLATFORM;
 		const requiredLabels = configuration?.requiredLabels ?? [];
 
 		const eligible = this.registry.findEligible(platform, requiredLabels);
-		if (eligible.length === 0) return false;
+		if (eligible.length === 0) {
+			this.queue.setPendingReason(buildId, this.registry.describeIneligibility(platform, requiredLabels));
+			return false;
+		}
 		const agent = eligible[0];
 
 		const payload = await this.buildAssignmentPayload(build, project, configuration);

@@ -12,6 +12,8 @@ interface SnapshotTestResultsProps {
 	buildId: string;
 	projectSlug: string;
 	configurationId: string;
+	/** Target platform of the build; references are scoped per platform. */
+	platform: string;
 }
 
 type FilterType = 'all' | 'passed' | 'failed';
@@ -36,7 +38,7 @@ const statusIcons: Record<SnapshotTestStatus, string> = {
 	crashed: '💥',
 };
 
-export function SnapshotTestResults({ results, categories, buildId, projectSlug, configurationId }: SnapshotTestResultsProps) {
+export function SnapshotTestResults({ results, categories, buildId, projectSlug, configurationId, platform }: SnapshotTestResultsProps) {
 	const [filter, setFilter] = useState<FilterType>('all');
 	const [viewMode, setViewMode] = useState<ViewMode>('grid');
 	const [searchQuery, setSearchQuery] = useState('');
@@ -199,6 +201,7 @@ export function SnapshotTestResults({ results, categories, buildId, projectSlug,
 					testName={selectedTest.testName}
 					projectSlug={projectSlug}
 					configurationId={configurationId}
+					platform={platform}
 					showCategory={cats.length > 1}
 					onClose={() => setSelectedTest(null)}
 				/>

@@ -1,5 +1,5 @@
 import type { Build, BuildSummary, CreateBuildInput, BuildStatus, TriggerType } from '@banshee-forge/shared';
-import { generateBuildId } from '@banshee-forge/shared';
+import { generateBuildId, DEFAULT_PLATFORM } from '@banshee-forge/shared';
 import { JsonFileStorage } from '../storage/json-file.js';
 
 interface BuildsFile {
@@ -41,7 +41,8 @@ export class BuildRepository {
     projectSlug: string,
     input: CreateBuildInput,
     triggerType: TriggerType,
-    configurationName = 'default'
+    configurationName = 'default',
+    platform: string = DEFAULT_PLATFORM
   ): Promise<Build> {
     const buildsPath = this.buildsFilePath(projectSlug);
     const data = await this.storage.read<BuildsFile>(buildsPath, { builds: [], nextBuildNumber: 1 });
@@ -62,6 +63,7 @@ export class BuildRepository {
       config: input.config ?? {},
       configurationId: input.configurationId ?? '',
       configurationName,
+      platform,
       cleanBuild: input.cleanBuild ?? false,
       warningCount: 0,
       errorCount: 0,
@@ -81,6 +83,7 @@ export class BuildRepository {
       config: input.config ?? {},
       configurationId: input.configurationId ?? '',
       configurationName,
+      platform,
       cleanBuild: input.cleanBuild ?? false,
       warningCount: 0,
       errorCount: 0,
@@ -168,6 +171,7 @@ export class BuildRepository {
       config: build.config,
       configurationId: build.configurationId,
       configurationName: build.configurationName,
+      platform: build.platform ?? DEFAULT_PLATFORM,
       cleanBuild: build.cleanBuild,
       startedAt: build.startedAt,
       finishedAt: build.finishedAt,
@@ -175,6 +179,8 @@ export class BuildRepository {
       warningCount: build.warningCount,
       errorCount: build.errorCount,
       testSummary: build.testSummary,
+      agentId: build.agentId,
+      agentName: build.agentName,
     };
   }
 

@@ -1,11 +1,3 @@
-import type { AgentPlatform } from './agent.js';
-
-/**
- * Re-exported for convenience: the platform this build configuration targets, or `'any'` for no
- * restriction. Used during build-to-agent matching by `AgentDispatcher`.
- */
-export type ConfigurationPlatform = AgentPlatform | 'any';
-
 /** Watched repository for git polling */
 export interface WatchedRepository {
   id: string;
@@ -96,8 +88,11 @@ export interface BuildConfiguration {
   forceCleanBuild?: boolean;         // If true, always wipe workspace before build
 
   // Agent matching
-  /** Required agent platform. Defaults to 'any'. */
-  platform?: ConfigurationPlatform;
+  /**
+   * Target platforms (ids from `platforms.json`) this configuration can be built for.
+   * Undefined or empty means every known platform. Each triggered build picks one of these.
+   */
+  platforms?: string[];
   /** Labels the agent must have to run this configuration (subset match). Defaults to []. */
   requiredLabels?: string[];
 
@@ -110,6 +105,12 @@ export type CreateConfigurationInput = Omit<BuildConfiguration, 'id' | 'createdA
 
 /** Build configuration update input */
 export type UpdateConfigurationInput = Partial<Omit<BuildConfiguration, 'id' | 'createdAt' | 'updatedAt'>>;
+
+/** A configuration plus the platforms polling should build it for. */
+export interface PollingTarget {
+  configurationId: string;
+  platforms: string[];
+}
 
 /** Project definition */
 export interface Project {
@@ -129,11 +130,12 @@ export interface Project {
   pollInterval: number;              // seconds
   watchedRepositories?: WatchedRepository[];  // Repos to poll for changes
   /**
-   * Configuration IDs to launch when polling activates a build. When undefined
-   * defaults to `[defaultConfigurationId]` (only the default configuration is
-   * launched). An empty array disables polling-triggered builds entirely.
+   * Builds to launch when polling detects new commits: one build per listed
+   * platform of each configuration. When undefined defaults to the default
+   * configuration on {@link DEFAULT_PLATFORM}. An empty array disables
+   * polling-triggered builds entirely.
    */
-  pollingConfigurationIds?: string[];
+  pollingTargets?: PollingTarget[];
 
   // Git state
   lastCommit?: string;

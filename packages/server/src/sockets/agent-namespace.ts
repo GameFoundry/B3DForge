@@ -8,6 +8,7 @@ import type {
 	AgentErrorEvent,
 } from '@banshee-forge/shared';
 import { AgentTokensRepository } from '../auth/agent-tokens-repository.js';
+import { KnownAgentsRepository } from '../repositories/known-agents-repository.js';
 import { AgentRegistry, RegisteredAgent } from '../services/agent-registry.js';
 import { AgentDispatcher } from '../services/agent-dispatcher.js';
 import { BuildOrchestrator } from '../services/build-orchestrator.js';
@@ -25,6 +26,7 @@ export function setupAgentNamespace(
 	registry: AgentRegistry,
 	dispatcher: AgentDispatcher,
 	orchestrator: BuildOrchestrator,
+	knownAgents: KnownAgentsRepository,
 ): void {
 	const ns = io.of(NAMESPACE);
 
@@ -69,6 +71,9 @@ export function setupAgentNamespace(
 			try {
 				registered = registry.register(socket, registration, tokenId);
 				socket.emit('agent:register-ack', { ok: true, agentId: registered.info.id });
+				// Remember the agent so its platforms stay selectable while it is offline.
+				knownAgents.upsert({ ...registration, platforms: registered.info.platforms })
+					.catch(err => console.error('Failed to record known agent:', err));
 				// Broadcast to web clients so dashboards refresh.
 				io.emit('agent:connected', registered.info);
 			} catch (err) {
@@ -113,6 +118,8 @@ export function setupAgentNamespace(
 			if (registered) {
 				const removed = registry.unregister(registered.info.id);
 				if (removed) io.emit('agent:disconnected', removed.info);
+				knownAgents.touch(registered.info.name)
+					.catch(err => console.error('Failed to update known agent:', err));
 			}
 		});
 	});

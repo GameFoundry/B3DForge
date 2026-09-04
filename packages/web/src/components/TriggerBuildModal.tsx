@@ -1,5 +1,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { Project, CreateBuildInput, ConfigSchema, ProjectConfig, BuildConfiguration } from '@banshee-forge/shared';
+import { PLATFORMS } from '@banshee-forge/shared';
+import { usePlatforms } from '../hooks/usePlatforms';
+import { PlatformSelector } from './PlatformSelector';
+
+/** Platforms a configuration may be built for: its own list, or every platform when unset. */
+function supportedPlatforms(configuration: BuildConfiguration | undefined): string[] {
+  const declared = configuration?.platforms;
+  return declared && declared.length > 0 ? declared : PLATFORMS.map(p => p.id);
+}
 
 interface TriggerBuildModalProps {
   project: Project;
@@ -18,6 +27,7 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
   const [gitCommit, setGitCommit] = useState('');
   const [gitBranch, setGitBranch] = useState(project.gitBranch);
   const [cleanBuild, setCleanBuild] = useState(false);
+  const { data: availability } = usePlatforms();
 
   // Get selected configuration
   const selectedConfig: BuildConfiguration | undefined = useMemo(() => {
@@ -46,11 +56,24 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
     setGitBranch(selectedConfig?.gitBranch || project.gitBranch);
   }, [selectedConfig, project.gitBranch]);
 
+  // Platforms: default to every supported platform that has an agent (live or remembered),
+  // re-evaluated when the configuration changes. Once availability loads, drop never-seen ones.
+  const supported = useMemo(() => supportedPlatforms(selectedConfig), [selectedConfig]);
+  const [platforms, setPlatforms] = useState<string[]>([]);
+  useEffect(() => {
+    const selectable = supported.filter(id =>
+      !availability || availability.find(a => a.id === id)?.status !== 'never-seen'
+    );
+    setPlatforms(selectable);
+  }, [supported, availability]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (platforms.length === 0) return;
 
     const input: CreateBuildInput = {
       configurationId: selectedConfigId || undefined,
+      platforms,
       gitBranch,
       config,
       cleanBuild,
@@ -172,6 +195,20 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
               </div>
             )}
 
+            {/* Platforms */}
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Platforms</label>
+              <PlatformSelector
+                value={platforms}
+                onChange={setPlatforms}
+                allowed={supported}
+                availability={availability}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                One build is queued per platform. A build for an offline agent waits until it reconnects.
+              </p>
+            </div>
+
             {/* Git Branch */}
             <div>
               <label className="block text-sm text-gray-400 mb-1">Branch</label>
@@ -237,7 +274,7 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
             </button>
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || platforms.length === 0}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium disabled:opacity-50 flex items-center gap-2"
             >
               {isLoading && (
@@ -246,7 +283,7 @@ export function TriggerBuildModal({ project, onTrigger, onClose, isLoading = fal
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               )}
-              Trigger Build
+              {platforms.length > 1 ? `Trigger ${platforms.length} Builds` : 'Trigger Build'}
             </button>
           </div>
         </form>

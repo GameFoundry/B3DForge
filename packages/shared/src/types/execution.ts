@@ -48,6 +48,11 @@ export interface QueuedBuild {
   projectSlug: string;
   priority: number;
   queuedAt: string;
+  /**
+   * Why the build is still waiting, set by the dispatcher after a failed dispatch attempt
+   * (e.g. "No connected agent can build darwin"). Absent until the first attempt.
+   */
+  pendingReason?: string;
 }
 
 export interface QueueStatus {

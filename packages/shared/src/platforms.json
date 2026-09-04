@@ -1,0 +1,6 @@
+[
+	{ "id": "win32", "label": "Windows" },
+	{ "id": "darwin", "label": "macOS" },
+	{ "id": "linux", "label": "Linux" },
+	{ "id": "ps5", "label": "PlayStation 5" }
+]

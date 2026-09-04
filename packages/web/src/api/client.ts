@@ -1,6 +1,6 @@
 import type {
   Project, CreateProjectInput, UpdateProjectInput,
-  Build, BuildSummary, CreateBuildInput, PaginatedResponse,
+  Build, BuildSummary, CreateBuildInput, TriggerBuildResponse, PaginatedResponse,
   LogLine, QueueStatus, ScriptSource, PollingStatus,
   BuildConfiguration, CreateConfigurationInput, UpdateConfigurationInput,
   ConfigResponse, ConfigUpdateResponse, ConfigValidationResponse, ServerConfigUpdate,
@@ -8,6 +8,7 @@ import type {
   ComparisonResult, ReferenceInfo, ReferenceManifest,
   AuthMeResponse, LoginRequest,
   AgentInfo, AgentTokenPublic, AgentArtifactUsage, AgentPurgeArtifactsResult,
+  KnownAgent, PlatformAvailability,
 } from '@banshee-forge/shared';
 
 export interface ScriptResponse {
@@ -134,8 +135,9 @@ export const buildsApi = {
   list: (projectSlug: string, page = 1, pageSize = 20) =>
     fetchJson<PaginatedResponse<BuildSummary>>(`${API_BASE}/projects/${projectSlug}/builds?page=${page}&pageSize=${pageSize}`),
   get: (id: string) => fetchJson<Build>(`${API_BASE}/builds/${id}`),
+  /** Creates one build per requested platform. */
   trigger: (projectSlug: string, input?: CreateBuildInput) =>
-    fetchJson<Build>(`${API_BASE}/projects/${projectSlug}/builds`, {
+    fetchJson<TriggerBuildResponse>(`${API_BASE}/projects/${projectSlug}/builds`, {
       method: 'POST', body: JSON.stringify(input ?? {})
     }),
   cancel: (id: string) => fetchJson<Build>(`${API_BASE}/builds/${id}`, { method: 'DELETE' }),
@@ -208,6 +210,15 @@ export const agentsApi = {
     }),
 };
 
+// Platforms API
+export const platformsApi = {
+  /** Every platform from platforms.json with the agents (live or remembered) able to build it. */
+  list: () => fetchJson<{ platforms: PlatformAvailability[] }>(`${API_BASE}/platforms`),
+  listKnownAgents: () => fetchJson<{ agents: KnownAgent[] }>(`${API_BASE}/known-agents`),
+  forgetAgent: (name: string) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/known-agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+};
+
 // Agent token API
 export interface CreatedAgentTokenResponse extends AgentTokenPublic {
   plaintext: string;
@@ -224,31 +235,31 @@ export const agentTokensApi = {
       .then(res => { if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`); }),
 };
 
-// References API
+// References API (scoped per configuration and target platform)
 export const referencesApi = {
   listAll: (projectSlug: string) =>
     fetchJson<{ references: Record<string, ReferenceManifest> }>(`${API_BASE}/projects/${projectSlug}/references`),
-  list: (projectSlug: string, configId: string) =>
-    fetchJson<{ references: ReferenceInfo[] }>(`${API_BASE}/projects/${projectSlug}/references/${configId}`),
-  getInfo: (projectSlug: string, configId: string, category: string, testName: string) =>
-    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}/info`),
-  setReference: (projectSlug: string, configId: string, category: string, testName: string, buildId: string) =>
-    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`, {
+  list: (projectSlug: string, configId: string, platform: string) =>
+    fetchJson<{ references: ReferenceInfo[] }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${platform}`),
+  getInfo: (projectSlug: string, configId: string, platform: string, category: string, testName: string) =>
+    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${platform}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}/info`),
+  setReference: (projectSlug: string, configId: string, platform: string, category: string, testName: string, buildId: string) =>
+    fetchJson<ReferenceInfo>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${platform}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`, {
       method: 'PUT', body: JSON.stringify({ buildId })
     }),
-  deleteReference: (projectSlug: string, configId: string, category: string, testName: string) =>
-    fetchJson<{ success: boolean }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`, {
+  deleteReference: (projectSlug: string, configId: string, platform: string, category: string, testName: string) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${platform}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`, {
       method: 'DELETE'
     }),
-  copyReferences: (projectSlug: string, destConfigId: string, sourceConfigId: string) =>
-    fetchJson<{ success: boolean; copiedCount: number }>(`${API_BASE}/projects/${projectSlug}/references/${destConfigId}/copy`, {
+  copyReferences: (projectSlug: string, platform: string, destConfigId: string, sourceConfigId: string) =>
+    fetchJson<{ success: boolean; copiedCount: number }>(`${API_BASE}/projects/${projectSlug}/references/${destConfigId}/${platform}/copy`, {
       method: 'POST', body: JSON.stringify({ sourceConfigId })
     }),
-  copyCategoryReferences: (projectSlug: string, configId: string, sourceCategory: string, destCategory: string) =>
-    fetchJson<{ success: boolean; copiedCount: number }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/copy-category`, {
+  copyCategoryReferences: (projectSlug: string, configId: string, platform: string, sourceCategory: string, destCategory: string) =>
+    fetchJson<{ success: boolean; copiedCount: number }>(`${API_BASE}/projects/${projectSlug}/references/${configId}/${platform}/copy-category`, {
       method: 'POST', body: JSON.stringify({ sourceCategory, destCategory })
     }),
   // URL getter for reference image
-  getReferenceUrl: (projectSlug: string, configId: string, category: string, testName: string) =>
-    `${API_BASE}/projects/${projectSlug}/references/${configId}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`,
+  getReferenceUrl: (projectSlug: string, configId: string, platform: string, category: string, testName: string) =>
+    `${API_BASE}/projects/${projectSlug}/references/${configId}/${platform}/${encodeURIComponent(category)}/${encodeURIComponent(testName)}`,
 };

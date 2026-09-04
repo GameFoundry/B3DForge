@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { toast } from 'sonner';
 import type { BuildStatus, TriggerType, TestSummary } from '@banshee-forge/shared';
+import { getPlatformLabel } from '@banshee-forge/shared';
 
 interface BuildStartedEvent {
   buildId: string;
@@ -10,6 +11,7 @@ interface BuildStartedEvent {
   buildNumber: number;
   triggerType: TriggerType;
   configurationName: string;
+  platform?: string;
 }
 
 interface BuildFinishedEvent {
@@ -19,6 +21,7 @@ interface BuildFinishedEvent {
   buildNumber: number;
   triggerType: TriggerType;
   configurationName: string;
+  platform?: string;
   status: BuildStatus;
   durationMs?: number;
   warningCount: number;
@@ -33,6 +36,11 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes}m ${remainingSeconds}s`;
+}
+
+/** "Config" or "Config, macOS" for the notification body. */
+function describeTarget(data: { configurationName: string; platform?: string }): string {
+  return data.platform ? `${data.configurationName}, ${getPlatformLabel(data.platform)}` : data.configurationName;
 }
 
 function sendOsNotification(title: string, body: string) {
@@ -59,7 +67,7 @@ export function useBuildNotifications() {
 
     socket.on('build:started', (data: BuildStartedEvent) => {
       const title = `Build #${data.buildNumber} started`;
-      const body = `${data.projectName} (${data.configurationName})`;
+      const body = `${data.projectName} (${describeTarget(data)})`;
 
       toast.info(title, {
         description: body,
@@ -74,14 +82,14 @@ export function useBuildNotifications() {
       if (data.status === 'success') {
         const warnings = data.warningCount > 0 ? ` with ${data.warningCount} warning${data.warningCount !== 1 ? 's' : ''}` : '';
         const title = `Build #${data.buildNumber} succeeded${warnings}`;
-        const body = `${data.projectName} (${data.configurationName})${duration}`;
+        const body = `${data.projectName} (${describeTarget(data)})${duration}`;
 
         toast.success(title, { description: body, duration: 6000 });
         sendOsNotification(title, body);
       } else {
         const errors = data.errorCount > 0 ? ` with ${data.errorCount} error${data.errorCount !== 1 ? 's' : ''}` : '';
         const title = `Build #${data.buildNumber} failed${errors}`;
-        const body = `${data.projectName} (${data.configurationName})${duration}`;
+        const body = `${data.projectName} (${describeTarget(data)})${duration}`;
 
         toast.error(title, { description: body, duration: 8000 });
         sendOsNotification(title, body);

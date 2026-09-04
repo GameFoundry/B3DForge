@@ -103,11 +103,11 @@ export function useReferences(projectSlug: string) {
 /**
  * Hook to list references for a specific configuration
  */
-export function useConfigurationReferences(projectSlug: string, configId: string) {
+export function useConfigurationReferences(projectSlug: string, configId: string, platform: string) {
 	return useQuery({
-		queryKey: ['references', projectSlug, configId],
-		queryFn: () => referencesApi.list(projectSlug, configId),
-		enabled: !!projectSlug && !!configId,
+		queryKey: ['references', projectSlug, configId, platform],
+		queryFn: () => referencesApi.list(projectSlug, configId, platform),
+		enabled: !!projectSlug && !!configId && !!platform,
 	});
 }
 
@@ -121,20 +121,22 @@ export function useSetReference() {
 		mutationFn: ({
 			projectSlug,
 			configId,
+			platform,
 			category,
 			testName,
 			buildId,
 		}: {
 			projectSlug: string;
 			configId: string;
+			platform: string;
 			category: string;
 			testName: string;
 			buildId: string;
-		}) => referencesApi.setReference(projectSlug, configId, category, testName, buildId),
-		onSuccess: (_, { projectSlug, configId, buildId, category, testName }) => {
+		}) => referencesApi.setReference(projectSlug, configId, platform, category, testName, buildId),
+		onSuccess: (_, { projectSlug, configId, platform, buildId, category, testName }) => {
 			// Invalidate references cache
 			queryClient.invalidateQueries({ queryKey: ['references', projectSlug] });
-			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, configId] });
+			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, configId, platform] });
 			// Invalidate comparison cache for this test
 			queryClient.invalidateQueries({ queryKey: ['tests', buildId, 'snapshots', category, testName, 'compare'] });
 			// Refresh the results list so diff percentages update
@@ -153,17 +155,19 @@ export function useDeleteReference() {
 		mutationFn: ({
 			projectSlug,
 			configId,
+			platform,
 			category,
 			testName,
 		}: {
 			projectSlug: string;
 			configId: string;
+			platform: string;
 			category: string;
 			testName: string;
-		}) => referencesApi.deleteReference(projectSlug, configId, category, testName),
-		onSuccess: (_, { projectSlug, configId }) => {
+		}) => referencesApi.deleteReference(projectSlug, configId, platform, category, testName),
+		onSuccess: (_, { projectSlug, configId, platform }) => {
 			queryClient.invalidateQueries({ queryKey: ['references', projectSlug] });
-			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, configId] });
+			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, configId, platform] });
 		},
 	});
 }
@@ -177,16 +181,18 @@ export function useCopyReferences() {
 	return useMutation({
 		mutationFn: ({
 			projectSlug,
+			platform,
 			destConfigId,
 			sourceConfigId,
 		}: {
 			projectSlug: string;
+			platform: string;
 			destConfigId: string;
 			sourceConfigId: string;
-		}) => referencesApi.copyReferences(projectSlug, destConfigId, sourceConfigId),
-		onSuccess: (_, { projectSlug, destConfigId }) => {
+		}) => referencesApi.copyReferences(projectSlug, platform, destConfigId, sourceConfigId),
+		onSuccess: (_, { projectSlug, destConfigId, platform }) => {
 			queryClient.invalidateQueries({ queryKey: ['references', projectSlug] });
-			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, destConfigId] });
+			queryClient.invalidateQueries({ queryKey: ['references', projectSlug, destConfigId, platform] });
 		},
 	});
 }

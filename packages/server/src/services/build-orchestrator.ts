@@ -14,6 +14,7 @@ import type {
 	AgentCompleteEvent,
 	AgentErrorEvent,
 } from '@banshee-forge/shared';
+import { DEFAULT_PLATFORM } from '@banshee-forge/shared';
 import { BuildQueue } from './build-queue.js';
 import { TestResultsService } from './test-results-service.js';
 import { BuildRepository } from '../repositories/build-repository.js';
@@ -116,6 +117,7 @@ export class BuildOrchestrator {
 				buildNumber: build.buildNumber,
 				triggerType: build.triggerType,
 				configurationName: build.configurationName,
+				platform: build.platform,
 				agentId,
 				agentName,
 			});
@@ -241,6 +243,7 @@ export class BuildOrchestrator {
 					buildNumber: build.buildNumber,
 					triggerType: build.triggerType,
 					configurationName: build.configurationName,
+					platform: build.platform,
 					status: finalStatus,
 					durationMs,
 					warningCount: state.warningCount,
@@ -431,6 +434,7 @@ export class BuildOrchestrator {
 			config: build.config,
 			configurationId: build.configurationId,
 			configurationName: build.configurationName,
+			platform: build.platform ?? DEFAULT_PLATFORM,
 			cleanBuild: build.cleanBuild,
 			startedAt: build.startedAt,
 			finishedAt: build.finishedAt,

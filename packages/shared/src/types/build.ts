@@ -40,6 +40,8 @@ export interface BuildSummary {
   config: ProjectConfig;
   configurationId: string;           // Which configuration was used
   configurationName: string;         // Denormalized for display
+  /** Target platform id (from `platforms.json`). Decides which agents may run the build. */
+  platform: string;
   cleanBuild: boolean;               // Whether workspace was wiped before build
   startedAt?: string;
   finishedAt?: string;
@@ -72,9 +74,19 @@ export interface Build extends BuildSummary {
 /** Build creation input */
 export interface CreateBuildInput {
   configurationId?: string;  // Optional: defaults to project's defaultConfigurationId
+  /**
+   * Target platforms to build for. One build is created per entry. Optional: defaults to
+   * every platform the configuration supports.
+   */
+  platforms?: string[];
   gitCommit?: string;        // Optional: defaults to branch HEAD
   gitBranch?: string;        // Optional: defaults to project's gitBranch
   config?: ProjectConfig;    // Optional: defaults to configuration's defaultConfig
   triggeredBy?: string;
   cleanBuild?: boolean;      // Optional: force clean workspace (wipe before build)
+}
+
+/** Response of the trigger-build endpoint: one build per requested platform. */
+export interface TriggerBuildResponse {
+  builds: Build[];
 }

@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { Server as SocketServer } from 'socket.io';
-import type { PollingStatus, PollingRepositoryStatus, WatchedRepository } from '@banshee-forge/shared';
+import type { PollingStatus, PollingRepositoryStatus, PollingTarget, WatchedRepository } from '@banshee-forge/shared';
+import { DEFAULT_PLATFORM } from '@banshee-forge/shared';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { BuildRepository } from '../repositories/build-repository.js';
 import { BuildOrchestrator } from './build-orchestrator.js';
@@ -189,26 +190,32 @@ export class GitPollingService {
     if (hasNewCommits) {
       await this.projectRepo.update(slug, { watchedRepositories: updatedRepos });
 
-      // Trigger builds only for the configurations the user selected for
-      // polling. When unset, fall back to the project's default configuration
-      // (so existing projects keep their previous "single build per poll"
-      // behavior).
-      const targetIds = project.pollingConfigurationIds
-        ?? (project.defaultConfigurationId ? [project.defaultConfigurationId] : []);
-      const autoConfigs = (project.configurations ?? []).filter(c => targetIds.includes(c.id));
-      for (const config of autoConfigs) {
-        try {
-          const build = await this.buildRepo.create(slug, {
-            configurationId: config.id,
-            gitBranch: config.gitBranch || project.gitBranch,
-            config: config.defaultConfig ?? {},
-            triggeredBy: 'git-polling',
-          }, 'auto', config.name);
+      // Trigger builds only for the configuration/platform pairs the user
+      // selected for polling. When unset, fall back to the default
+      // configuration on the default platform (so existing projects keep their
+      // previous "single build per poll" behavior).
+      const targets: PollingTarget[] = project.pollingTargets
+        ?? (project.defaultConfigurationId
+          ? [{ configurationId: project.defaultConfigurationId, platforms: [DEFAULT_PLATFORM] }]
+          : []);
+      for (const target of targets) {
+        const config = (project.configurations ?? []).find(c => c.id === target.configurationId);
+        if (!config) continue;
 
-          await this.orchestrator.triggerBuild(slug, build.id);
-          console.log(`Auto-build triggered for ${slug}/${config.name} (build ${build.id})`);
-        } catch (error) {
-          console.error(`Failed to trigger auto-build for ${slug}/${config.name}:`, error);
+        for (const platform of target.platforms) {
+          try {
+            const build = await this.buildRepo.create(slug, {
+              configurationId: config.id,
+              gitBranch: config.gitBranch || project.gitBranch,
+              config: config.defaultConfig ?? {},
+              triggeredBy: 'git-polling',
+            }, 'auto', config.name, platform);
+
+            await this.orchestrator.triggerBuild(slug, build.id);
+            console.log(`Auto-build triggered for ${slug}/${config.name} [${platform}] (build ${build.id})`);
+          } catch (error) {
+            console.error(`Failed to trigger auto-build for ${slug}/${config.name} [${platform}]:`, error);
+          }
         }
       }
     }
