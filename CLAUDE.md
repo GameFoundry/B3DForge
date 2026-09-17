@@ -35,7 +35,8 @@ BansheeForge/
 ├── pnpm-workspace.yaml   # Workspace definition
 ├── tsconfig.base.json    # Shared TypeScript config
 ├── config.json           # Server configuration
-└── rebuild.sh            # Production build/deploy script
+├── rebuild.sh            # Production build/deploy script (server + local agent under pm2)
+└── rebuild-agent.sh      # Rebuild shared+agent and restart the agent's supervisor on any platform
 ```
 
 ## Development Commands

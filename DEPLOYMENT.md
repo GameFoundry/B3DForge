@@ -114,7 +114,8 @@ cd Framework/Tools/BansheeForge
 
 This writes `~/.bansheeforge-agent/agent.json`, installs
 `~/Library/LaunchAgents/com.bansheeforge.agent.plist`, and starts the agent. Logs go to
-`~/.bansheeforge-agent/agent.log`. Re-run the script after rebuilding or changing the config.
+`~/.bansheeforge-agent/agent.log`. Re-run the script only when the config or node path changes;
+to pick up new agent code run `./rebuild-agent.sh` (see *Updating an agent* below).
 
 Behaviour to know about:
 
@@ -439,6 +440,19 @@ pm2 start packages/agent/dist/index.js \
 	--env BSF_AGENT_TOKEN=bsf_agt_…
 pm2 save
 ```
+
+### Updating an agent
+
+`./rebuild-agent.sh` in the BansheeForge checkout of the agent host rebuilds the
+`shared` and `agent` packages and restarts whatever supervises the agent: the
+launchd user agent on macOS, the `bansheeforge-agent` systemd unit on Linux,
+the `BansheeForgeAgent` service or a pm2 app on Windows. `--pull` fast-forwards
+the checkout first (only when it is on a branch; a submodule checkout is
+updated through its parent), `--no-build` just restarts. The last lines of the
+agent log are printed so the `Connected` / `Registered` lines are visible.
+
+Update every agent whenever the agent protocol changes; an outdated agent still
+connects and builds, but its builds cannot be deployed.
 
 ### Operational notes
 
