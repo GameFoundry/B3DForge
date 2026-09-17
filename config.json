@@ -1,5 +1,9 @@
 {
   "dataPath": "D:\\BansheeForgeData",
   "port": 3003,
-  "bindHost": "0.0.0.0"
+  "bindHost": "0.0.0.0",
+  "cookieSecure": false,
+  "deploy": {
+    "credentialsFile": "D:\\Projects\\Banshee\\b3d_credentials"
+  }
 }

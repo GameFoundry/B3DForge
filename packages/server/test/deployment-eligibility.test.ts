@@ -186,3 +186,14 @@ test('uploads are accepted only for recorded paths from the assigned agent while
 	assert.ok(target.endsWith('X_Win32_1.tar.gz'));
 	await deployments.save({ ...current, status: 'failed' });
 });
+
+test('cancelling a non-terminal deployment nothing drives settles it as cancelled', async () => {
+	const stuck = (await deployments.findById('editor', 'deploy-x'))!;
+	await deployments.save({ ...stuck, status: 'running', phases: [{ name: 'validate', status: 'running', startedAt: new Date().toISOString() }] });
+	const current = (await deployments.findById('editor', 'deploy-x'))!;
+	assert.equal(await service.cancel(current), true);
+	const settled = (await deployments.findById('editor', 'deploy-x'))!;
+	assert.equal(settled.status, 'cancelled');
+	assert.equal(settled.phases[0].status, 'failed');
+	assert.equal(await service.cancel(settled), false);
+});

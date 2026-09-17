@@ -63,6 +63,14 @@ export class DeploymentService extends EventEmitter {
 	/** Active server-side script sessions, for cancellation. */
 	private sessions = new Map<string, ScriptSession>();
 	private cancelled = new Set<string>();
+	/** Deployments a `run` of this process is currently driving. */
+	private active = new Set<string>();
+	/**
+	 * Per-deployment chains serialising every read-modify-write of a record. Phase events, stage
+	 * transitions and the failure path all update the same file; without the chain a handler that
+	 * read the record early could save its stale copy last and undo a status change.
+	 */
+	private writes = new Map<string, Promise<unknown>>();
 
 	constructor(
 		private io: SocketServer,
@@ -221,8 +229,11 @@ export class DeploymentService extends EventEmitter {
 		}
 		this.sessions.get(deployment.id)?.kill();
 
-		if (deployment.status === 'pending' || (deployment.status === 'promoting' && deployment.pendingReason)) {
-			// Nothing is running for it; settle it right away.
+		// Nothing in this process drives it (still queued, parked until its group members finish, or
+		// left non-terminal by an earlier failure): settle it now instead of waiting for a run that
+		// will not come. An active run notices the flag and settles itself.
+		if (!this.active.has(deployment.id)) {
+			this.cancelled.delete(deployment.id);
 			await this.finish(deployment, 'cancelled', 'Cancelled');
 		}
 		return true;
@@ -315,6 +326,19 @@ export class DeploymentService extends EventEmitter {
 	}
 
 	private async run(deploymentId: string, projectSlug: string): Promise<void> {
+		this.active.add(deploymentId);
+		try {
+			await this.runStages(deploymentId, projectSlug);
+		} finally {
+			this.active.delete(deploymentId);
+			this.cancelled.delete(deploymentId);
+			this.sessions.delete(deploymentId);
+			// The received files are only needed while the script runs; a retry transfers them again.
+			await fs.rm(this.deployments.inputsDirectory(projectSlug, deploymentId), { recursive: true, force: true }).catch(() => undefined);
+		}
+	}
+
+	private async runStages(deploymentId: string, projectSlug: string): Promise<void> {
 		let deployment = await this.deployments.findById(projectSlug, deploymentId);
 		if (!deployment || deployment.status !== 'pending') return;
 		if (this.cancelled.has(deploymentId)) { await this.finish(deployment, 'cancelled', 'Cancelled'); return; }
@@ -327,7 +351,7 @@ export class DeploymentService extends EventEmitter {
 			return;
 		}
 
-		deployment.startedAt = new Date().toISOString();
+		deployment = (await this.update(projectSlug, deploymentId, current => { current.startedAt = new Date().toISOString(); }))!;
 		await this.appendLog(deployment, `Deployment ${deployment.id} of build #${build.buildNumber} (${build.platform}) started.`);
 
 		try {
@@ -345,23 +369,19 @@ export class DeploymentService extends EventEmitter {
 				await this.appendLog(current, message, 'error');
 				await this.finish(current, 'failed', message);
 			}
-		} finally {
-			this.cancelled.delete(deploymentId);
-			this.sessions.delete(deploymentId);
-			// The received files are only needed while the script runs; a retry transfers them again.
-			await fs.rm(this.deployments.inputsDirectory(projectSlug, deploymentId), { recursive: true, force: true }).catch(() => undefined);
 		}
 	}
 
 	/** Have the originating agent send the build's deploy files and verify they arrived intact. */
 	private async transferStage(deployment: Deployment): Promise<Deployment> {
 		const agent = await this.waitForAgent(deployment);
-		deployment = (await this.deployments.findById(deployment.projectSlug, deployment.id))!;
 		this.ensureNotCancelled(deployment.id);
 
-		deployment.agentTokenId = agent.tokenId;
-		deployment.pendingReason = undefined;
-		await this.setStatus(deployment, 'transferring');
+		deployment = (await this.update(deployment.projectSlug, deployment.id, current => {
+			current.agentTokenId = agent.tokenId;
+			current.pendingReason = undefined;
+			current.status = 'transferring';
+		}))!;
 		const total = deployment.files.reduce((sum, f) => sum + f.size, 0);
 		await this.appendLog(deployment, `Requesting ${deployment.files.length} deploy file(s) (${formatSize(total)}) from agent ${agent.info.name}.`);
 
@@ -420,7 +440,7 @@ export class DeploymentService extends EventEmitter {
 
 	/** Run the build's `deploy.sh` on the orchestrator and collect what it left behind. */
 	private async runStage(deployment: Deployment, build: Build, project: Project, configuration: BuildConfiguration): Promise<Deployment> {
-		await this.setStatus(deployment, 'running');
+		deployment = (await this.update(deployment.projectSlug, deployment.id, current => { current.status = 'running'; }))!;
 		this.ensureNotCancelled(deployment.id);
 
 		const inputsRoot = this.deployments.inputsDirectory(deployment.projectSlug, deployment.id);
@@ -460,11 +480,10 @@ export class DeploymentService extends EventEmitter {
 		const result = await session.execute(DEPLOY_SCRIPT_NAME, body, inputsRoot, env, SCRIPT_TIMEOUT_MS);
 		await fs.rm(scriptsDir, { recursive: true, force: true });
 
-		deployment = (await this.deployments.findById(deployment.projectSlug, deployment.id))!;
-		deployment.results = await readResults(resultsFile);
-		deployment.artifacts = await listArtifacts(outputRoot);
-		await this.deployments.save(deployment);
-		this.emitUpdated(deployment);
+		deployment = (await this.update(deployment.projectSlug, deployment.id, async current => {
+			current.results = await readResults(resultsFile);
+			current.artifacts = await listArtifacts(outputRoot);
+		}))!;
 		if (deployment.artifacts.length > 0) await this.appendLog(deployment, `Artifacts: ${deployment.artifacts.map(a => a.path).join(', ')}`);
 
 		this.ensureNotCancelled(deployment.id);
@@ -478,13 +497,14 @@ export class DeploymentService extends EventEmitter {
 	 * its script and let the last one promote on behalf of all. Skipped without a target branch.
 	 */
 	private async promoteStage(deployment: Deployment, project: Project): Promise<void> {
-		if (!deployment.targetBranch) {
+		const targetBranch = deployment.targetBranch;
+		if (!targetBranch) {
 			await this.appendLog(deployment, 'No target branch; skipping promotion.');
 			await this.finish(deployment, 'success');
 			return;
 		}
 
-		await this.setStatus(deployment, 'promoting');
+		deployment = (await this.update(deployment.projectSlug, deployment.id, current => { current.status = 'promoting'; }))!;
 		this.ensureNotCancelled(deployment.id);
 
 		let participants: Deployment[] = [deployment];
@@ -492,10 +512,9 @@ export class DeploymentService extends EventEmitter {
 			const group = await this.groups.findById(project.slug, deployment.groupId);
 			const waiting = group ? await this.groupPromotionState(group, deployment) : { ready: [deployment], missing: [] };
 			if (waiting.missing.length > 0) {
-				deployment.pendingReason = `Waiting for ${waiting.missing.join(', ')} to finish before promoting`;
-				await this.deployments.save(deployment);
-				await this.appendLog(deployment, deployment.pendingReason);
-				this.emitUpdated(deployment);
+				const reason = `Waiting for ${waiting.missing.join(', ')} to finish before promoting`;
+				deployment = (await this.update(deployment.projectSlug, deployment.id, current => { current.pendingReason = reason; }))!;
+				await this.appendLog(deployment, reason);
 				return;
 			}
 			participants = waiting.ready;
@@ -515,24 +534,23 @@ export class DeploymentService extends EventEmitter {
 				rootUrl: project.gitUrl,
 				rootCommit: deployment.rootCommit,
 				buildBranch: deployment.buildBranch,
-				targetBranch: deployment.targetBranch,
+				targetBranch,
 				credentials,
 				log,
 			});
 			for (const participant of participants) {
-				const current = (await this.deployments.findById(participant.projectSlug, participant.id)) ?? participant;
-				current.promotion = record;
-				current.promotionReused = record.deploymentId !== current.id;
-				current.pendingReason = undefined;
-				await this.finish(current, 'success');
+				await this.finish(participant, 'success', undefined, current => {
+					current.promotion = record;
+					current.promotionReused = record.deploymentId !== current.id;
+					current.pendingReason = undefined;
+				});
 			}
 		} catch (err) {
 			const message = err instanceof PromotionError ? err.message : `Promotion failed: ${(err as Error).message}`;
 			for (const participant of participants) {
 				if (participant.id === deployment.id) continue;
-				const current = (await this.deployments.findById(participant.projectSlug, participant.id)) ?? participant;
-				await this.appendLog(current, message, 'error');
-				await this.finish(current, 'failed', message);
+				await this.appendLog(participant, message, 'error');
+				await this.finish(participant, 'failed', message);
 			}
 			throw new DeploymentError(message);
 		}
@@ -563,11 +581,9 @@ export class DeploymentService extends EventEmitter {
 			const agent = this.registry.findByName(deployment.agentName);
 			if (agent) return agent;
 
-			const current = (await this.deployments.findById(deployment.projectSlug, deployment.id))!;
-			current.pendingReason = `Agent ${deployment.agentName} is offline; waiting for it to reconnect`;
-			await this.deployments.save(current);
-			await this.appendLog(current, current.pendingReason, 'warning');
-			this.emitUpdated(current);
+			const reason = `Agent ${deployment.agentName} is offline; waiting for it to reconnect`;
+			const current = (await this.update(deployment.projectSlug, deployment.id, c => { c.pendingReason = reason; }))!;
+			await this.appendLog(current, reason, 'warning');
 
 			await new Promise<void>(resume => this.waitingForConnection.set(deployment.id, { agentName: deployment.agentName, resume }));
 		}
@@ -606,35 +622,50 @@ export class DeploymentService extends EventEmitter {
 	}
 
 	private async recordPhase(deployment: Deployment, phase: BuildPhase, action: 'start' | 'end'): Promise<void> {
-		const current = await this.deployments.findById(deployment.projectSlug, deployment.id);
-		if (!current) return;
-		const index = current.phases.findIndex(p => p.name === phase.name && p.status === 'running');
-		if (action === 'start' && index === -1) current.phases.push(phase);
-		else if (index !== -1) current.phases[index] = phase;
-		else current.phases.push(phase);
-		await this.deployments.save(current);
-		this.emitUpdated(current);
+		await this.update(deployment.projectSlug, deployment.id, current => {
+			const index = current.phases.findIndex(p => p.name === phase.name && p.status === 'running');
+			if (action === 'start' && index === -1) current.phases.push(phase);
+			else if (index !== -1) current.phases[index] = phase;
+			else current.phases.push(phase);
+		});
 	}
 
-	private async setStatus(deployment: Deployment, status: DeploymentStatus): Promise<void> {
-		deployment.status = status;
-		await this.deployments.save(deployment);
-		this.emitUpdated(deployment);
+	/**
+	 * Re-read the record, apply `mutate`, save and broadcast it, serialised with every other update
+	 * of the same deployment. Returns the saved record, or null when it no longer exists.
+	 */
+	private update(projectSlug: string, deploymentId: string, mutate: (current: Deployment) => void | Promise<void>): Promise<Deployment | null> {
+		const previous = this.writes.get(deploymentId) ?? Promise.resolve();
+		const next = previous.catch(() => undefined).then(async () => {
+			const current = await this.deployments.findById(projectSlug, deploymentId);
+			if (!current) return null;
+			await mutate(current);
+			await this.deployments.save(current);
+			this.emitUpdated(current);
+			return current;
+		});
+		this.writes.set(deploymentId, next);
+		void next.catch(() => undefined).finally(() => { if (this.writes.get(deploymentId) === next) this.writes.delete(deploymentId); });
+		return next;
 	}
 
-	private async finish(deployment: Deployment, status: 'success' | 'failed' | 'cancelled', error?: string): Promise<void> {
-		deployment.status = status;
-		deployment.error = error;
-		deployment.finishedAt = new Date().toISOString();
-		if (deployment.startedAt) deployment.durationMs = new Date(deployment.finishedAt).getTime() - new Date(deployment.startedAt).getTime();
-		for (const phase of deployment.phases) {
-			if (phase.status !== 'running') continue;
-			phase.status = status === 'success' ? 'success' : 'failed';
-			phase.finishedAt = deployment.finishedAt;
-		}
-		await this.deployments.save(deployment);
-		this.emitUpdated(deployment);
-		this.io.emit('deployment:finished', { projectSlug: deployment.projectSlug, deploymentId: deployment.id, buildId: deployment.buildId, platform: deployment.platform, status, error });
+	/** Settle a deployment; `apply` sets whatever else the terminal record must carry. */
+	private async finish(deployment: Deployment, status: 'success' | 'failed' | 'cancelled', error?: string, apply?: (current: Deployment) => void): Promise<void> {
+		const finished = await this.update(deployment.projectSlug, deployment.id, current => {
+			apply?.(current);
+			current.status = status;
+			current.error = error;
+			current.finishedAt = new Date().toISOString();
+			if (current.startedAt) current.durationMs = new Date(current.finishedAt).getTime() - new Date(current.startedAt).getTime();
+			for (const phase of current.phases) {
+				if (phase.status !== 'running') continue;
+				phase.status = status === 'success' ? 'success' : 'failed';
+				phase.finishedAt = current.finishedAt;
+			}
+		});
+		if (!finished) return;
+		Object.assign(deployment, finished);
+		this.io.emit('deployment:finished', { projectSlug: finished.projectSlug, deploymentId: finished.id, buildId: finished.buildId, platform: finished.platform, status, error });
 	}
 
 	private async appendLog(deployment: Deployment, message: string, level: LogLine['level'] = 'info'): Promise<void> {

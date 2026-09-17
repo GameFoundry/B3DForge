@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { Build, BuildConfiguration, Deployment, DeploymentStatus, DeploySchema, LogLine } from '@banshee-forge/shared';
+import type { Build, BuildConfiguration, Deployment, DeploymentFile, DeploymentStatus, DeploySchema, LogLine } from '@banshee-forge/shared';
 import { getPlatformLabel, isValidBranchName } from '@banshee-forge/shared';
 import {
   useDeployEligibility, useBuildDeployments, useCreateDeployment, useRetryDeployment,
@@ -30,6 +30,56 @@ function DeploymentStatusBadge({ status }: { status: DeploymentStatus }) {
       {isDeploymentActive({ status } as Deployment) && <span className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />}
       {status}
     </span>
+  );
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KiB', 'MiB', 'GiB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+/**
+ * The files the build left for deployment, grouped by their top-level folder. The orchestrator
+ * only knows the paths; what a folder means (packaged dependencies, a framework archive) is the
+ * build script's convention, but the listing lets the operator see what deploy.sh will get.
+ */
+function DeployFilesSummary({ files }: { files: DeploymentFile[] }) {
+  const groups = useMemo(() => {
+    const byFolder = new Map<string, DeploymentFile[]>();
+    for (const file of files) {
+      const slash = file.path.indexOf('/');
+      const folder = slash === -1 ? '' : file.path.slice(0, slash);
+      byFolder.set(folder, [...(byFolder.get(folder) ?? []), file]);
+    }
+    return [...byFolder.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [files]);
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+
+  return (
+    <details className="border-t border-gray-700 pt-3">
+      <summary className="text-xs text-gray-400 cursor-pointer select-none">
+        Deploy files: {files.length} ({formatSize(total)})
+      </summary>
+      <div className="mt-2 space-y-2">
+        {groups.map(([folder, entries]) => (
+          <div key={folder}>
+            <div className="text-xs text-gray-500 font-mono">{folder ? `${folder}/` : '(root)'} · {entries.length} file{entries.length !== 1 ? 's' : ''} · {formatSize(entries.reduce((sum, f) => sum + f.size, 0))}</div>
+            <ul className="pl-4 space-y-0.5">
+              {entries.map(file => (
+                <li key={file.path} className="text-xs font-mono text-gray-300 flex justify-between gap-4">
+                  <span className="truncate">{folder ? file.path.slice(folder.length + 1) : file.path}</span>
+                  <span className="text-gray-500 flex-shrink-0">{formatSize(file.size)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -201,6 +251,10 @@ export function DeployPanel({ build, configuration }: DeployPanelProps) {
               );
             })}
           </div>
+        )}
+
+        {finished && !build.deploymentInputs?.purged && (build.deploymentInputs?.files.length ?? 0) > 0 && (
+          <DeployFilesSummary files={build.deploymentInputs!.files} />
         )}
 
         {!finished && <p className="text-xs text-gray-400">The build is still running.</p>}
