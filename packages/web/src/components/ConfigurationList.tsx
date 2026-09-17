@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { BuildConfiguration, Project, CreateConfigurationInput, ScriptSource, ScriptConfig } from '@banshee-forge/shared';
+import { DEFAULT_DEPLOY_BRANCH, isValidBranchName } from '@banshee-forge/shared';
 import {
   useCreateConfiguration,
   useUpdateConfiguration,
@@ -17,6 +18,7 @@ import {
 } from '../hooks/useProjects';
 import { ScriptEditor } from './ScriptEditor';
 import { PlatformSelector } from './PlatformSelector';
+import { DeployParametersEditor, rowsToSchema, schemaToRows } from './DeployParametersEditor';
 
 interface ConfigurationListProps {
   project: Project;
@@ -296,6 +298,7 @@ function ConfigurationItem({
   const [forceCleanBuild, setForceCleanBuild] = useState(configuration.forceCleanBuild ?? false);
   const [platforms, setPlatforms] = useState<string[]>(configuration.platforms ?? []);
   const [labelsText, setLabelsText] = useState((configuration.requiredLabels ?? []).join(', '));
+  const [deployRows, setDeployRows] = useState(() => schemaToRows(configuration.deploySchema));
 
   // Script hooks
   const { data: fetchScriptData } = useConfigurationFetchScript(projectSlug, configuration.id);
@@ -317,6 +320,7 @@ function ConfigurationItem({
       forceCleanBuild,
       platforms,
       requiredLabels: requiredLabels.length ? requiredLabels : [],
+      deploySchema: rowsToSchema(deployRows),
     });
   };
 
@@ -519,6 +523,13 @@ function ConfigurationItem({
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100"
                 />
               </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Deploy parameters</label>
+                <p className="text-xs text-gray-500 mb-2">
+                  Asked for in the Deploy tab and passed to the build's <code>deploy.sh</code> as environment variables.
+                </p>
+                <DeployParametersEditor rows={deployRows} onChange={setDeployRows} />
+              </div>
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
@@ -606,6 +617,7 @@ function ConfigurationItem({
                 isDeleting={deleteTestScript.isPending}
                 isTestScript
               />
+
             </>
           )}
         </div>
@@ -620,29 +632,34 @@ interface ProjectRepositorySettingsProps {
 
 function ProjectRepositorySettings({ project }: ProjectRepositorySettingsProps) {
   const updateProject = useUpdateProject();
+  const projectDeployBranch = project.deployBranch ?? DEFAULT_DEPLOY_BRANCH;
   const [gitUrl, setGitUrl] = useState(project.gitUrl);
   const [gitBranch, setGitBranch] = useState(project.gitBranch);
+  const [deployBranch, setDeployBranch] = useState(projectDeployBranch);
 
   // Reset the editable values whenever the project changes underneath us.
-  const [lastSynced, setLastSynced] = useState(`${project.gitUrl}\n${project.gitBranch}`);
-  const currentSynced = `${project.gitUrl}\n${project.gitBranch}`;
+  const [lastSynced, setLastSynced] = useState(`${project.gitUrl}\n${project.gitBranch}\n${projectDeployBranch}`);
+  const currentSynced = `${project.gitUrl}\n${project.gitBranch}\n${projectDeployBranch}`;
   if (currentSynced !== lastSynced) {
     setLastSynced(currentSynced);
     setGitUrl(project.gitUrl);
     setGitBranch(project.gitBranch);
+    setDeployBranch(projectDeployBranch);
   }
 
   const trimmedUrl = gitUrl.trim();
   const trimmedBranch = gitBranch.trim();
-  const isDirty = trimmedUrl !== project.gitUrl || trimmedBranch !== project.gitBranch;
-  const canSave = !!trimmedUrl && !!trimmedBranch && isDirty;
+  const trimmedDeploy = deployBranch.trim();
+  const isDirty = trimmedUrl !== project.gitUrl || trimmedBranch !== project.gitBranch || trimmedDeploy !== projectDeployBranch;
+  const branchesValid = isValidBranchName(trimmedBranch) && isValidBranchName(trimmedDeploy) && trimmedBranch !== trimmedDeploy;
+  const canSave = !!trimmedUrl && branchesValid && isDirty;
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
     updateProject.mutate({
       slug: project.slug,
-      input: { gitUrl: trimmedUrl, gitBranch: trimmedBranch },
+      input: { gitUrl: trimmedUrl, gitBranch: trimmedBranch, deployBranch: trimmedDeploy },
     });
   };
 
@@ -666,17 +683,39 @@ function ProjectRepositorySettings({ project }: ProjectRepositorySettingsProps) 
           className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 font-mono text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
         />
       </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-400 mb-1">Default Branch</label>
-        <input
-          type="text"
-          value={gitBranch}
-          onChange={(e) => setGitBranch(e.target.value)}
-          placeholder="master"
-          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 font-mono text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-        />
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">Build Branch</label>
+          <input
+            type="text"
+            value={gitBranch}
+            onChange={(e) => setGitBranch(e.target.value)}
+            placeholder="staging"
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 font-mono text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Checked out in the root and in every submodule that has a branch of this name. Configurations
+            and Trigger Build can override it.
+          </p>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">Default Deploy Branch</label>
+          <input
+            type="text"
+            value={deployBranch}
+            onChange={(e) => setDeployBranch(e.target.value)}
+            placeholder={DEFAULT_DEPLOY_BRANCH}
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 font-mono text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Offered as the target when deploying a build; each deployment can pick another branch.
+          </p>
+        </div>
       </div>
-      <div className="flex justify-end">
+      <div className="flex justify-end items-center gap-3">
+        {isDirty && !branchesValid && (
+          <span className="text-xs text-red-400">Build and deploy branches must be two different, valid branch names</span>
+        )}
         <button
           type="submit"
           disabled={!canSave || updateProject.isPending}

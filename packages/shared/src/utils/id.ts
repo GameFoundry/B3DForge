@@ -26,3 +26,9 @@ export const generateSessionId = () => randomBytes(32).toString('base64url');
 
 /** Generate agent token record ID */
 export const generateAgentTokenId = () => generateId('agt');
+
+/** Generate build group ID */
+export const generateBuildGroupId = () => generateId('group');
+
+/** Generate deployment ID */
+export const generateDeploymentId = () => generateId('deploy');

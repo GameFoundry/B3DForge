@@ -3,8 +3,8 @@ import { Server as SocketServer } from 'socket.io';
 import type { PollingStatus, PollingRepositoryStatus, PollingTarget, WatchedRepository } from '@banshee-forge/shared';
 import { DEFAULT_PLATFORM } from '@banshee-forge/shared';
 import { ProjectRepository } from '../repositories/project-repository.js';
-import { BuildRepository } from '../repositories/build-repository.js';
 import { BuildOrchestrator } from './build-orchestrator.js';
+import { BuildTriggerService } from './build-trigger-service.js';
 
 interface PollingState {
   lastPollAt?: string;
@@ -18,7 +18,7 @@ export class GitPollingService {
 
   constructor(
     private projectRepo: ProjectRepository,
-    private buildRepo: BuildRepository,
+    private triggerService: BuildTriggerService,
     private orchestrator: BuildOrchestrator,
     private io: SocketServer,
   ) {}
@@ -198,24 +198,23 @@ export class GitPollingService {
         ?? (project.defaultConfigurationId
           ? [{ configurationId: project.defaultConfigurationId, platforms: [DEFAULT_PLATFORM] }]
           : []);
+      // One group per configuration: every platform of the target builds the same source snapshot.
       for (const target of targets) {
         const config = (project.configurations ?? []).find(c => c.id === target.configurationId);
-        if (!config) continue;
+        if (!config || target.platforms.length === 0) continue;
 
-        for (const platform of target.platforms) {
-          try {
-            const build = await this.buildRepo.create(slug, {
-              configurationId: config.id,
-              gitBranch: config.gitBranch || project.gitBranch,
-              config: config.defaultConfig ?? {},
-              triggeredBy: 'git-polling',
-            }, 'auto', config.name, platform);
-
-            await this.orchestrator.triggerBuild(slug, build.id);
-            console.log(`Auto-build triggered for ${slug}/${config.name} [${platform}] (build ${build.id})`);
-          } catch (error) {
-            console.error(`Failed to trigger auto-build for ${slug}/${config.name} [${platform}]:`, error);
-          }
+        try {
+          const { builds } = await this.triggerService.triggerGroup({
+            project,
+            configuration: config,
+            platforms: target.platforms,
+            triggerType: 'auto',
+            triggeredBy: 'git-polling',
+          });
+          for (const build of builds)
+            console.log(`Auto-build triggered for ${slug}/${config.name} [${build.platform}] (build ${build.id})`);
+        } catch (error) {
+          console.error(`Failed to trigger auto-build for ${slug}/${config.name} [${target.platforms.join(', ')}]:`, error);
         }
       }
     }

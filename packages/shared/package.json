@@ -8,12 +8,17 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./node": {
+      "import": "./dist/node/index.js",
+      "types": "./dist/node/index.d.ts"
     }
   },
   "scripts": {
     "build": "tsc",
     "clean": "rimraf dist",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "tsc && node --test \"test/**/*.test.js\""
   },
   "devDependencies": {
     "rimraf": "^5.0.0",

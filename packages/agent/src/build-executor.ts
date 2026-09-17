@@ -1,9 +1,10 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { promises as fs } from 'fs';
 import type {
 	BuildAssignment,
+	BuildDeploymentInputs,
 	BuildPhase,
 	PhaseStatus,
 	LogLine,
@@ -12,6 +13,9 @@ import type {
 	RepositoryCommitInfo,
 } from '@banshee-forge/shared';
 import { parseLine } from '@banshee-forge/shared';
+import { findBashPath, runBashScript, toUnixPath, type BashScriptRun } from '@banshee-forge/shared/node';
+import { collectDeploymentInputs, DEPLOY_DIR_NAME } from './deployment-inputs.js';
+import { resolveWorkspace, WorkspaceLocks } from './workspace.js';
 
 export interface ExecutorEvents {
 	'log': (lines: LogLine[]) => void;
@@ -27,11 +31,11 @@ export declare interface BuildExecutor {
 }
 
 export interface ExecutorConfig {
-	/** Root directory under which per-project, per-configuration workspaces live. */
+	/** Root directory under which per-project, per-configuration, per-platform workspaces live. */
 	workspaceRoot: string;
 	/**
-	 * Root directory holding the per-build `results`/`artifacts` directories. Defaults to a
-	 * `builds` sibling of {@link workspaceRoot}. Shared with {@link ArtifactStore}, which purges
+	 * Root directory holding the per-build `results`/`artifacts`/`deploy` directories. Defaults to
+	 * a `builds` sibling of {@link workspaceRoot}. Shared with {@link ArtifactStore}, which purges
 	 * the artifact trees, so the two must agree on the layout.
 	 */
 	buildsRoot: string;
@@ -74,11 +78,11 @@ const DEFAULT_CONFIG: ExecutorConfig = {
 	logBufferIntervalMs: 100,
 	maxLogBatchBytes: 512 * 1024,
 	maxLogLineBytes: 128 * 1024,
-	bashPath: IS_WINDOWS ? 'C:\\Program Files\\Git\\bin\\bash.exe' : undefined,
+	bashPath: undefined,
 };
 
 export class BuildExecutor extends EventEmitter {
-	private process: ChildProcess | null = null;
+	private run: BashScriptRun | null = null;
 	private currentPhase: BuildPhase | null = null;
 	private phases: BuildPhase[] = [];
 	private warningCount = 0;
@@ -89,6 +93,8 @@ export class BuildExecutor extends EventEmitter {
 	private repositoryCommits: RepositoryCommitInfo[] = [];
 	private resultsDir: string | null = null;
 	private snapshotCategories: string[] = [];
+	private deploymentInputs: BuildDeploymentInputs | null = null;
+	private releaseWorkspace: (() => void) | null = null;
 
 	private logBuffer: LogLine[] = [];
 	private logFlushTimer: NodeJS.Timeout | null = null;
@@ -101,31 +107,55 @@ export class BuildExecutor extends EventEmitter {
 	}
 
 	async execute(assignment: BuildAssignment, timeoutMs?: number): Promise<void> {
+		try {
+			await this.executeInner(assignment, timeoutMs);
+		} finally {
+			this.releaseWorkspace?.();
+			this.releaseWorkspace = null;
+		}
+	}
+
+	private async executeInner(assignment: BuildAssignment, timeoutMs?: number): Promise<void> {
 		const { build, project, configuration, scripts } = assignment;
 		const configId = configuration?.id ?? 'default';
+		const platform = build.platform ?? process.platform;
 
-		const workspace = path.join(this.config.workspaceRoot, project.slug, configId);
-		// Per-build paths kept on the agent. Test results are uploaded to the orchestrator
-		// at end of build so they appear in the build detail UI; artifacts stay local.
+		// Per-build paths kept on the agent. Test results are uploaded to the orchestrator at end
+		// of build so they appear in the build detail UI; artifacts and deploy files stay local
+		// until a deployment asks for them.
 		const buildsRoot = this.config.buildsRoot || path.resolve(this.config.workspaceRoot, '..', 'builds');
 		const buildLocalDir = path.join(buildsRoot, build.id);
 		const resultsDir = path.join(buildLocalDir, 'results');
 		const artifactsDir = path.join(buildLocalDir, 'artifacts');
+		const deployDir = path.join(buildLocalDir, DEPLOY_DIR_NAME);
 		const scriptsDir = path.join(this.config.scriptsRoot, build.id);
 		this.resultsDir = resultsDir;
+
+		let workspace: string;
+		try {
+			workspace = await resolveWorkspace(this.config.workspaceRoot, project.slug, configId, platform);
+		} catch (err) {
+			this.emit('error', 'WORKSPACE_ERROR', `Failed to resolve workspace: ${err}`);
+			return;
+		}
+
+		// Two builds of the same configuration and platform share one incremental workspace, so
+		// they must not run in it at the same time. The second one waits for the first to finish.
+		if (WorkspaceLocks.isHeld(workspace)) {
+			this.logBuffer.push(this.infoLine(`Waiting for another build to leave workspace ${workspace}...`));
+		}
+		this.releaseWorkspace = await WorkspaceLocks.acquire(workspace);
+		if (this.killed) {
+			this.emit('complete', 'failed', -1);
+			return;
+		}
 
 		const shouldClean = build.cleanBuild || configuration?.forceCleanBuild;
 
 		if (shouldClean) {
 			try {
 				await fs.access(workspace);
-				this.logBuffer.push({
-					timestamp: new Date().toISOString(),
-					level: 'info',
-					phase: 'init',
-					message: 'Cleaning workspace for fresh build...',
-					lineNumber: ++this.lineNumber,
-				});
+				this.logBuffer.push(this.infoLine('Cleaning workspace for fresh build...'));
 				await fs.rm(workspace, { recursive: true, force: true });
 			} catch {
 				// Workspace doesn't exist, nothing to clean
@@ -137,6 +167,9 @@ export class BuildExecutor extends EventEmitter {
 			await fs.mkdir(resultsDir, { recursive: true });
 			await fs.mkdir(artifactsDir, { recursive: true });
 			await fs.mkdir(scriptsDir, { recursive: true });
+			// Inputs from a previous run of this build id (a retry) must not leak into this one.
+			await fs.rm(deployDir, { recursive: true, force: true });
+			await fs.mkdir(deployDir, { recursive: true });
 		} catch (err) {
 			this.emit('error', 'WORKSPACE_ERROR', `Failed to create workspace: ${err}`);
 			return;
@@ -161,14 +194,15 @@ export class BuildExecutor extends EventEmitter {
 			CONFIGURATION_NAME: configuration?.name ?? 'default',
 			// Target platform the build is for (win32/darwin/linux/ps5) versus the OS running the
 			// scripts. Scripts branch on PLATFORM; HOST_PLATFORM matters when they differ (e.g. ps5).
-			PLATFORM: build.platform ?? process.platform,
+			PLATFORM: platform,
 			HOST_PLATFORM: process.platform,
 			ARCH: process.arch,
 			BUILD_TYPE: configuration?.buildType ?? '',
 			CLEAN_BUILD: shouldClean ? '1' : '0',
-			WORKSPACE: this.toUnixPath(workspace),
-			ARTIFACTS_DIR: this.toUnixPath(artifactsDir),
-			RESULTS_DIR: this.toUnixPath(resultsDir),
+			WORKSPACE: toUnixPath(workspace),
+			ARTIFACTS_DIR: toUnixPath(artifactsDir),
+			RESULTS_DIR: toUnixPath(resultsDir),
+			DEPLOY_DIR: toUnixPath(deployDir),
 			...Object.fromEntries(
 				Object.entries(build.config).map(([k, v]) => [k.toUpperCase(), String(v)])
 			),
@@ -182,8 +216,9 @@ export class BuildExecutor extends EventEmitter {
 
 		this.logFlushTimer = setInterval(() => this.flushLogBuffer(), this.config.logBufferIntervalMs);
 
-		const bashPath = await this.findBashPath();
+		const bashPath = await findBashPath(this.config.bashPath);
 		if (!bashPath) {
+			this.cleanup();
 			this.emit('error', 'EXECUTION_FAILED', IS_WINDOWS
 				? 'Git Bash not found. Please install Git for Windows.'
 				: 'bash not found in PATH.');
@@ -192,7 +227,7 @@ export class BuildExecutor extends EventEmitter {
 
 		// Phase 1: fetch
 		this.startPhase('fetch');
-		const fetchResult = await this.runBashScript(bashPath, fetchScriptPath, workspace, env);
+		const fetchResult = await this.runScript(bashPath, fetchScriptPath, workspace, env);
 
 		if (this.killed) {
 			this.cleanup();
@@ -224,10 +259,10 @@ export class BuildExecutor extends EventEmitter {
 		const testScriptPath = scripts.test
 			? await this.resolveScript(scripts.test, scriptsDir, 'test.sh', workspace)
 			: null;
-		env.TEST_SCRIPT = testScriptPath ? this.toUnixPath(testScriptPath) : '';
+		env.TEST_SCRIPT = testScriptPath ? toUnixPath(testScriptPath) : '';
 
 		// Phase 2: build
-		const buildResult = await this.runBashScript(bashPath, buildScriptPath, workspace, env);
+		const buildResult = await this.runScript(bashPath, buildScriptPath, workspace, env);
 		this.finishCurrentPhase(buildResult.success ? 'success' : 'failed', buildResult.exitCode);
 		this.flushLogBuffer();
 
@@ -245,40 +280,49 @@ export class BuildExecutor extends EventEmitter {
 
 		// Phase 3 (optional): tests
 		const shouldRunTests = build.config.runTests && testScriptPath;
+		let status: 'success' | 'failed' = 'success';
+		let exitCode = 0;
 		if (shouldRunTests) {
 			this.startPhase('tests');
-			const testResult = await this.runBashScript(bashPath, testScriptPath, workspace, env);
+			const testResult = await this.runScript(bashPath, testScriptPath, workspace, env);
 			this.finishCurrentPhase(testResult.success ? 'success' : 'failed', testResult.exitCode);
 			this.flushLogBuffer();
-			this.cleanup();
 			if (this.killed) {
+				this.cleanup();
 				this.emit('complete', 'failed', -1);
-			} else {
-				this.emit('complete', testResult.success ? 'success' : 'failed', testResult.exitCode);
+				return;
 			}
-		} else {
-			if (this.currentPhase && this.currentPhase.status === 'running') {
-				this.finishCurrentPhase('success', 0);
-			}
-			this.flushLogBuffer();
-			this.cleanup();
-			this.emit('complete', 'success', 0);
+			status = testResult.success ? 'success' : 'failed';
+			exitCode = testResult.exitCode;
+		} else if (this.currentPhase && this.currentPhase.status === 'running') {
+			this.finishCurrentPhase('success', 0);
 		}
+
+		// Record what the build left in its deploy directory. Hashing happens here, once, so the
+		// orchestrator can verify the files when a deployment transfers them.
+		if (status === 'success') {
+			try {
+				this.deploymentInputs = await collectDeploymentInputs(buildLocalDir);
+				if (this.deploymentInputs) {
+					const total = this.deploymentInputs.files.reduce((sum, f) => sum + f.size, 0);
+					this.logBuffer.push(this.infoLine(`Deploy files recorded: ${this.deploymentInputs.files.length} file(s), ${(total / 1024 ** 2).toFixed(1)} MiB.`));
+				} else {
+					this.logBuffer.push(this.infoLine('No deploy files recorded (build script left the deploy directory empty).'));
+				}
+			} catch (err) {
+				this.logBuffer.push(this.infoLine(`Failed to record deployment inputs: ${err}`, 'warning'));
+			}
+		}
+
+		this.flushLogBuffer();
+		this.cleanup();
+		this.emit('complete', status, exitCode);
 	}
 
 	kill(): void {
-		if (this.process && !this.killed) {
+		if (!this.killed) {
 			this.killed = true;
-			if (IS_WINDOWS) {
-				spawn('taskkill', ['/pid', String(this.process.pid), '/f', '/t'], { windowsHide: true });
-			} else if (this.process.pid !== undefined) {
-				try {
-					// Negative pid = process group; we spawn with detached:true on POSIX so this works.
-					process.kill(-this.process.pid, 'SIGKILL');
-				} catch {
-					try { this.process.kill('SIGKILL'); } catch { /* already dead */ }
-				}
-			}
+			this.run?.kill();
 		}
 	}
 
@@ -289,6 +333,18 @@ export class BuildExecutor extends EventEmitter {
 	getResultsDir(): string | null { return this.resultsDir; }
 	/** Snapshot categories declared via `::snapshot-category::` markers, in emission order. */
 	getSnapshotCategories(): string[] { return [...this.snapshotCategories]; }
+	/** Deploy files a deployment can draw on; null when the build script left none. */
+	getDeploymentInputs(): BuildDeploymentInputs | null { return this.deploymentInputs; }
+
+	private infoLine(message: string, level: LogLine['level'] = 'info'): LogLine {
+		return {
+			timestamp: new Date().toISOString(),
+			level,
+			phase: this.currentPhase?.name ?? 'init',
+			message,
+			lineNumber: ++this.lineNumber,
+		};
+	}
 
 	private async writeInlineScript(scriptsDir: string, name: string, body: string): Promise<string> {
 		const filePath = path.join(scriptsDir, name);
@@ -319,97 +375,18 @@ export class BuildExecutor extends EventEmitter {
 		}
 	}
 
-	private runBashScript(
+	private async runScript(
 		bashPath: string,
 		scriptPath: string,
 		cwd: string,
 		env: NodeJS.ProcessEnv,
 	): Promise<{ success: boolean; exitCode: number }> {
-		return new Promise((resolve) => {
-			this.process = spawn(bashPath, [
-				'--login',
-				'-c',
-				`set -x; source "${this.toUnixPath(scriptPath)}"`,
-			], {
-				cwd,
-				env,
-				stdio: ['ignore', 'pipe', 'pipe'],
-				windowsHide: true,
-				shell: false,
-				// On POSIX, run in its own process group so we can SIGKILL the whole tree.
-				detached: !IS_WINDOWS,
-			});
-
-			let stdoutEnded = false;
-			let stderrEnded = false;
-			let processExited = false;
-			let exitCode = 1;
-
-			const maybeResolve = () => {
-				if (stdoutEnded && stderrEnded && processExited) {
-					resolve({ success: exitCode === 0, exitCode });
-				}
-			};
-
-			this.process.stdout?.on('data', (data: Buffer) => this.processOutput(data.toString()));
-			this.process.stdout?.on('end', () => { stdoutEnded = true; maybeResolve(); });
-			this.process.stderr?.on('data', (data: Buffer) => this.processOutput(data.toString()));
-			this.process.stderr?.on('end', () => { stderrEnded = true; maybeResolve(); });
-
-			this.process.on('close', (code) => {
-				exitCode = code ?? 1;
-				processExited = true;
-				maybeResolve();
-			});
-
-			this.process.on('error', (error) => {
-				this.processOutput(`Script error: ${error.message}\n`);
-				stdoutEnded = true;
-				stderrEnded = true;
-				processExited = true;
-				resolve({ success: false, exitCode: 1 });
-			});
-		});
-	}
-
-	private async findBashPath(): Promise<string | null> {
-		if (this.config.bashPath) {
-			try {
-				await fs.access(this.config.bashPath);
-				return this.config.bashPath;
-			} catch {
-				// fall through to candidates
-			}
+		this.run = runBashScript(bashPath, scriptPath, cwd, env, text => this.processOutput(text));
+		try {
+			return await this.run.result;
+		} finally {
+			this.run = null;
 		}
-
-		if (IS_WINDOWS) {
-			const candidates = [
-				'C:\\Program Files\\Git\\bin\\bash.exe',
-				'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-				process.env.GIT_BASH_PATH,
-			].filter(Boolean) as string[];
-
-			for (const candidate of candidates) {
-				try { await fs.access(candidate); return candidate; } catch { /* try next */ }
-			}
-			return 'bash';
-		}
-
-		// POSIX: prefer absolute, otherwise rely on PATH lookup by spawn. On macOS the system
-		// bash is 3.2, which lacks the associative arrays the CI scripts use, so a Homebrew bash
-		// (Apple Silicon and Intel prefixes) is preferred when installed.
-		const candidates = process.platform === 'darwin'
-			? ['/opt/homebrew/bin/bash', '/usr/local/bin/bash', '/bin/bash']
-			: ['/bin/bash', '/usr/bin/bash', '/usr/local/bin/bash'];
-		for (const candidate of candidates) {
-			try { await fs.access(candidate); return candidate; } catch { /* try next */ }
-		}
-		return 'bash';
-	}
-
-	private toUnixPath(p: string): string {
-		if (!IS_WINDOWS) return p;
-		return p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, drive) => `/${drive.toLowerCase()}`);
 	}
 
 	private async captureRepositoryCommits(workspace: string, projectName: string): Promise<void> {
@@ -423,16 +400,17 @@ export class BuildExecutor extends EventEmitter {
 					commit: mainCommit.trim(),
 					commitMessage: mainMessage?.trim() ?? '',
 					depth: 0,
+					path: '',
 				});
 			}
 
-			await this.captureSubmoduleCommits(workspace, 1);
+			await this.captureSubmoduleCommits(workspace, workspace, 1);
 		} catch (err) {
 			console.warn('Failed to capture repository commits:', err);
 		}
 	}
 
-	private async captureSubmoduleCommits(repoDir: string, depth: number): Promise<void> {
+	private async captureSubmoduleCommits(workspace: string, repoDir: string, depth: number): Promise<void> {
 		const output = await this.execGit(repoDir, [
 			'submodule', 'foreach', '--quiet',
 			'echo "$name||$toplevel/$sm_path"',
@@ -454,8 +432,11 @@ export class BuildExecutor extends EventEmitter {
 					commit: subCommit.trim(),
 					commitMessage: subMessage?.trim() ?? '',
 					depth,
+					// Paths are workspace-relative with forward slashes; git prints the toplevel
+					// in native form on Windows, so normalize before comparing.
+					path: workspaceRelativePath(workspace, trimmedPath),
 				});
-				await this.captureSubmoduleCommits(trimmedPath, depth + 1);
+				await this.captureSubmoduleCommits(workspace, trimmedPath, depth + 1);
 			}
 		}
 	}
@@ -618,4 +599,17 @@ export class BuildExecutor extends EventEmitter {
 			this.logFlushTimer = null;
 		}
 	}
+}
+
+/** `target` relative to `workspace`, with forward slashes, tolerant of drive-letter case and MSYS paths. */
+function workspaceRelativePath(workspace: string, target: string): string {
+	const normalizedTarget = IS_WINDOWS ? fromMsysPath(target) : target;
+	const relative = path.relative(path.resolve(workspace), path.resolve(normalizedTarget));
+	return relative.split(path.sep).join('/');
+}
+
+/** Git Bash prints `/c/foo` style paths from `submodule foreach`; map them back to `C:\foo`. */
+function fromMsysPath(p: string): string {
+	const match = /^\/([A-Za-z])\/(.*)$/.exec(p);
+	return match ? `${match[1].toUpperCase()}:\\${match[2].replace(/\//g, '\\')}` : p;
 }

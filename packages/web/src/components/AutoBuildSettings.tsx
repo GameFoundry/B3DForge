@@ -258,6 +258,7 @@ export function AutoBuildSettings({ project }: AutoBuildSettingsProps) {
 
         {showAddRepo && (
           <RepoForm
+            defaultBranch={project.gitBranch}
             onSubmit={handleAddRepo}
             onCancel={() => setShowAddRepo(false)}
           />
@@ -389,14 +390,16 @@ export function AutoBuildSettings({ project }: AutoBuildSettingsProps) {
 
 interface RepoFormProps {
   initialValues?: Partial<WatchedRepository>;
+  /** Branch offered for a new repository; the project's build branch. */
+  defaultBranch?: string;
   onSubmit: (values: Omit<WatchedRepository, 'id'>) => void;
   onCancel: () => void;
 }
 
-function RepoForm({ initialValues, onSubmit, onCancel }: RepoFormProps) {
+function RepoForm({ initialValues, defaultBranch, onSubmit, onCancel }: RepoFormProps) {
   const [name, setName] = useState(initialValues?.name ?? '');
   const [gitUrl, setGitUrl] = useState(initialValues?.gitUrl ?? '');
-  const [gitBranch, setGitBranch] = useState(initialValues?.gitBranch ?? 'master');
+  const [gitBranch, setGitBranch] = useState(initialValues?.gitBranch ?? defaultBranch ?? 'master');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

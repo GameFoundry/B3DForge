@@ -6,12 +6,14 @@ import type {
 	AgentPhaseEvent,
 	AgentCompleteEvent,
 	AgentErrorEvent,
+	AgentFilesSentEvent,
 } from '@banshee-forge/shared';
 import { AgentTokensRepository } from '../auth/agent-tokens-repository.js';
 import { KnownAgentsRepository } from '../repositories/known-agents-repository.js';
 import { AgentRegistry, RegisteredAgent } from '../services/agent-registry.js';
 import { AgentDispatcher } from '../services/agent-dispatcher.js';
 import { BuildOrchestrator } from '../services/build-orchestrator.js';
+import { DeploymentService } from '../services/deployment-service.js';
 
 const NAMESPACE = '/agents';
 
@@ -27,6 +29,7 @@ export function setupAgentNamespace(
 	dispatcher: AgentDispatcher,
 	orchestrator: BuildOrchestrator,
 	knownAgents: KnownAgentsRepository,
+	deployments: DeploymentService,
 ): void {
 	const ns = io.of(NAMESPACE);
 
@@ -110,6 +113,10 @@ export function setupAgentNamespace(
 				await orchestrator.onAgentError(event, slug, agentId);
 				dispatcher.finalizeAssignment(event.buildId);
 			})().catch(err => console.error('Failed to handle agent:error:', err));
+		});
+
+		socket.on('agent:files-sent', (event: AgentFilesSentEvent) => {
+			if (registered) deployments.onAgentFilesSent(event, registered.info.id);
 		});
 
 		socket.on('disconnect', (reason: string) => {

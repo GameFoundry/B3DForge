@@ -1,17 +1,22 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { AgentArtifactUsage, AgentPurgeArtifactsResult } from '@banshee-forge/shared';
+import { DEPLOY_DIR_NAME } from './deployment-inputs.js';
 
 /** Name of the per-build subdirectory holding the install tree produced by the build script. */
 const ARTIFACTS_DIR_NAME = 'artifacts';
 
+/** Per-build directories a purge removes: the install tree and the packaged deployment inputs. */
+const PURGED_DIR_NAMES = [ARTIFACTS_DIR_NAME, DEPLOY_DIR_NAME];
+
 /**
- * Manages the per-build artifact directories at `{buildsRoot}/{buildId}/artifacts`.
+ * Manages the per-build artifact directories at `{buildsRoot}/{buildId}/artifacts` and the
+ * deployment inputs beside them at `{buildsRoot}/{buildId}/deploy`.
  *
- * Artifacts never leave the agent — only logs and test results are uploaded — so nothing prunes
- * them and they accumulate at roughly one full install tree per build. Since no part of the system
- * reads them back, they are safe to delete once a build has finished; only builds that are still
- * running are protected, as their scripts are actively writing into the tree.
+ * Artifacts stay on the agent until a deployment asks for them — only logs and test results are
+ * uploaded at the end of a build — so nothing prunes them and they accumulate at roughly one full
+ * install tree per build. A purge deletes them for every build that is neither running nor
+ * protected by the orchestrator (a build a pending or running deployment still needs).
  */
 export class ArtifactStore {
 	/** Guards against overlapping purges, which would double-count the bytes they report. */
@@ -33,10 +38,10 @@ export class ArtifactStore {
 	 * Total the artifact directories on disk, splitting out the part a purge could reclaim. Walks
 	 * the whole tree, so it takes seconds; callers should not block anything interactive on it.
 	 *
-	 * `isActive` is queried rather than passed as a set so it reflects the builds running at the
-	 * moment each directory is examined, not when the request arrived.
+	 * `isProtected` is queried rather than passed as a set so it reflects the builds running at
+	 * the moment each directory is examined, not when the request arrived.
 	 */
-	async measure(isActive: (buildId: string) => boolean): Promise<AgentArtifactUsage> {
+	async measure(isProtected: (buildId: string) => boolean): Promise<AgentArtifactUsage> {
 		const usage: AgentArtifactUsage = {
 			totalBytes: 0,
 			buildCount: 0,
@@ -46,10 +51,10 @@ export class ArtifactStore {
 		};
 
 		for (const buildId of await this.listBuildsWithArtifacts()) {
-			const bytes = await directorySize(path.join(this.buildsRoot, buildId, ARTIFACTS_DIR_NAME));
+			const bytes = await this.buildSize(buildId);
 			usage.totalBytes += bytes;
 			usage.buildCount++;
-			if (!isActive(buildId)) {
+			if (!isProtected(buildId)) {
 				usage.purgeableBytes += bytes;
 				usage.purgeableCount++;
 			}
@@ -59,15 +64,16 @@ export class ArtifactStore {
 	}
 
 	/**
-	 * Delete the artifacts directory of every build that isn't currently running, reporting the
-	 * bytes reclaimed. A build whose directory can't be removed (e.g. a file held open by a
-	 * lingering process) is recorded in `errors` and skipped; the rest still get purged.
+	 * Delete the artifact and deployment-input directories of every build that is neither running
+	 * nor protected, reporting the bytes reclaimed. A build whose directory can't be removed (e.g.
+	 * a file held open by a lingering process) is recorded in `errors` and skipped; the rest still
+	 * get purged.
 	 *
-	 * `isActive` is re-queried immediately before each delete: listing and sizing the tree is slow
-	 * enough that a build can be assigned partway through, and its artifacts must not be pulled out
-	 * from under it.
+	 * `isProtected` is re-queried immediately before each delete: listing and sizing the tree is
+	 * slow enough that a build can be assigned partway through, and its artifacts must not be
+	 * pulled out from under it.
 	 */
-	async purge(isActive: (buildId: string) => boolean): Promise<AgentPurgeArtifactsResult> {
+	async purge(isProtected: (buildId: string) => boolean): Promise<AgentPurgeArtifactsResult> {
 		if (this.purging) throw new Error('A purge is already in progress');
 		this.purging = true;
 
@@ -75,31 +81,34 @@ export class ArtifactStore {
 			deletedCount: 0,
 			freedBytes: 0,
 			skippedBuildIds: [],
+			deletedBuildIds: [],
 			errors: [],
 		};
 
 		try {
 			for (const buildId of await this.listBuildsWithArtifacts()) {
-				if (isActive(buildId)) {
+				if (isProtected(buildId)) {
 					result.skippedBuildIds.push(buildId);
 					continue;
 				}
 
 				const buildDir = path.join(this.buildsRoot, buildId);
-				const artifactsDir = path.join(buildDir, ARTIFACTS_DIR_NAME);
 
 				try {
 					// Size must be taken before the delete; fs.rm doesn't report what it removed.
-					const bytes = await directorySize(artifactsDir);
+					const bytes = await this.buildSize(buildId);
 
 					// The size walk above takes time, so re-check before committing to the delete.
-					if (isActive(buildId)) {
+					if (isProtected(buildId)) {
 						result.skippedBuildIds.push(buildId);
 						continue;
 					}
 
-					await fs.rm(artifactsDir, { recursive: true, force: true });
+					for (const name of PURGED_DIR_NAMES) {
+						await fs.rm(path.join(buildDir, name), { recursive: true, force: true });
+					}
 					result.deletedCount++;
+					result.deletedBuildIds.push(buildId);
 					result.freedBytes += bytes;
 					await removeIfEmpty(buildDir);
 				} catch (err) {
@@ -114,8 +123,16 @@ export class ArtifactStore {
 		return result;
 	}
 
+	private async buildSize(buildId: string): Promise<number> {
+		let total = 0;
+		for (const name of PURGED_DIR_NAMES) {
+			total += await directorySize(path.join(this.buildsRoot, buildId, name));
+		}
+		return total;
+	}
+
 	/**
-	 * Build IDs under `buildsRoot` that currently have a real artifacts directory.
+	 * Build IDs under `buildsRoot` that currently have a real artifacts or deploy directory.
 	 *
 	 * Symlinks and Windows junctions are deliberately excluded at both levels. `fs.rm` would only
 	 * unlink such an entry rather than delete through it, so including one would leave the reported
@@ -135,11 +152,13 @@ export class ArtifactStore {
 		for (const entry of entries) {
 			// Dirents are lstat-based, so this already rejects a linked build directory.
 			if (!entry.isDirectory()) continue;
-			try {
-				const stat = await fs.lstat(path.join(this.buildsRoot, entry.name, ARTIFACTS_DIR_NAME));
-				if (stat.isDirectory()) buildIds.push(entry.name);
-			} catch {
-				// No artifacts directory for this build — nothing to report or purge.
+			for (const name of PURGED_DIR_NAMES) {
+				try {
+					const stat = await fs.lstat(path.join(this.buildsRoot, entry.name, name));
+					if (stat.isDirectory()) { buildIds.push(entry.name); break; }
+				} catch {
+					// No such directory for this build — try the next name.
+				}
 			}
 		}
 		return buildIds;

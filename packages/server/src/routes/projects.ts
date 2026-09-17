@@ -4,17 +4,88 @@ import type {
   UpdateProjectInput,
   CreateConfigurationInput,
   UpdateConfigurationInput,
+  UpdatePinsInput,
 } from '@banshee-forge/shared';
+import { isValidBranchName } from '@banshee-forge/shared';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { GitPollingService } from '../services/git-polling-service.js';
+import { ConfigService } from '../services/config-service.js';
+import { PinUpdateError, SubmodulePinService, readGitCredentials } from '../services/submodule-pin-service.js';
 import { AuditLog } from '../auth/audit-log.js';
+
+export interface ProjectRoutesOptions {
+	/** Reads and updates submodule pins; the pins endpoints are absent without it. */
+	pins?: SubmodulePinService;
+	/** Supplies the credentials file the pin update pushes with. */
+	configService?: ConfigService;
+}
 
 export function createProjectRoutes(
 	projectRepo: ProjectRepository,
 	pollingService?: GitPollingService,
-	auditLog?: AuditLog
+	auditLog?: AuditLog,
+	options: ProjectRoutesOptions = {}
 ): Router {
   const router = Router();
+
+  // GET /api/v1/projects/:slug/pins?branch=<name>[&commit=<sha>]
+  // Compare every submodule pin of the branch head (or the given commit) with the head of the
+  // submodule's branch, so the Trigger Build modal can offer to update stale pins first.
+  router.get('/:slug/pins', async (req, res, next) => {
+    try {
+      const project = await projectRepo.findBySlug(req.params.slug);
+      if (!project || !options.pins) {
+        res.status(404).json({ error: 'Not found', message: 'Project not found' });
+        return;
+      }
+      const branch = String(req.query.branch ?? '').trim() || project.gitBranch;
+      const commit = String(req.query.commit ?? '').trim() || undefined;
+      if (!isValidBranchName(branch)) {
+        res.status(400).json({ error: 'Bad request', message: `'${branch}' is not a valid branch name` });
+        return;
+      }
+      try {
+        res.json(await options.pins.inspect({ rootUrl: project.gitUrl, branch, rootCommit: commit }));
+      } catch (error) {
+        res.status(400).json({ error: 'Bad request', message: `Could not inspect pins: ${(error as Error).message}` });
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /api/v1/projects/:slug/pins/update  { branch, expectedRootCommit }
+  // Write pin commits (children first) so the branch pins the branch heads of every submodule,
+  // with plain pushes. 409 when a branch moved since the inspection; nothing is retried.
+  router.post('/:slug/pins/update', async (req, res, next) => {
+    try {
+      const project = await projectRepo.findBySlug(req.params.slug);
+      if (!project || !options.pins) {
+        res.status(404).json({ error: 'Not found', message: 'Project not found' });
+        return;
+      }
+      const input = (req.body ?? {}) as Partial<UpdatePinsInput>;
+      const branch = (input.branch ?? '').trim();
+      if (!isValidBranchName(branch) || !/^[0-9a-f]{40}$/.test(input.expectedRootCommit ?? '')) {
+        res.status(400).json({ error: 'Bad request', message: 'branch and expectedRootCommit are required' });
+        return;
+      }
+      try {
+        const credentials = await readGitCredentials(options.configService?.getConfig().deploy.credentialsFile);
+        const result = await options.pins.updatePins({ rootName: project.name, rootUrl: project.gitUrl, branch, expectedRootCommit: input.expectedRootCommit!, credentials });
+        auditLog?.append({ actor: AuditLog.actorOf(req), action: 'pins.update', target: req.params.slug, details: { branch, from: input.expectedRootCommit, to: result.rootCommit, updates: result.updates.map(u => `${u.name}: ${u.from.slice(0, 7)} -> ${u.to.slice(0, 7)}`) } });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof PinUpdateError) {
+          res.status(error.conflict ? 409 : 400).json({ error: error.conflict ? 'Conflict' : 'Bad request', message: error.message });
+          return;
+        }
+        res.status(400).json({ error: 'Bad request', message: `Could not update pins: ${(error as Error).message}` });
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
 
   // GET /api/v1/projects - List all projects
   router.get('/', async (_req, res, next) => {
@@ -66,7 +137,8 @@ export function createProjectRoutes(
       if (pollingService && (
         input.autoBuild !== undefined ||
         input.pollInterval !== undefined ||
-        input.watchedRepositories !== undefined
+        input.watchedRepositories !== undefined ||
+        input.gitBranch !== undefined
       ))
         await pollingService.updateProject(req.params.slug);
 

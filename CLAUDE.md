@@ -82,6 +82,11 @@ cd packages/web && pnpm dev       # Frontend on :3000 (proxied to backend)
 ### Backend (`packages/server/src/services/`)
 
 - **BuildOrchestrator**: Manages build lifecycle, queuing, and real-time updates
+- **BuildTriggerService**: Resolves the root commit and creates one build per platform as a build group
+- **SubmodulePinService**: Inspects submodule pins of a branch head against the submodules' branch heads and writes/pushes pin commits (children first, plain pushes) from bare git caches under `git-cache/`
+- **DeploymentService**: Eligibility, deployment state machine (transfer → run `deploy.sh` → promote), auto-deploy of build groups, purge protection; knows nothing project-specific
+- **PromotionService**: Children-first push of the tested commits to the target branch (fast-forward or `merge-tree` merge, never forced) with a journal per root commit and branch
+- **ScriptResolver**: Turns script configurations into inline bodies or repository paths
 - **AgentDispatcher / AgentRegistry**: Match pending builds to connected agents by platform, labels and availability
 - **BuildQueue**: Priority queue of pending builds, with per-build pending reasons
 - **GitPollingService**: Polls watched repositories and launches polling targets
@@ -93,6 +98,8 @@ cd packages/web && pnpm dev       # Frontend on :3000 (proxied to backend)
 
 - **ProjectRepository**: CRUD for projects and configurations
 - **BuildRepository**: Build storage and log management
+- **BuildGroupRepository**: Persisted build groups (`builds/{slug}/groups/{groupId}.json`)
+- **DeploymentRepository**: Deployments, their logs, received deploy files, `deploy.sh` output artifacts and the promotion journal
 - **KnownAgentsRepository**: Agents seen at least once (for offline platform availability)
 - **TestResultsRepository**: Test result archiving
 - **ReferenceRepository**: Snapshot reference images, scoped per configuration *and platform*
@@ -114,18 +121,34 @@ D:\BansheeForgeData/
 │           ├── log.txt               # Full build log
 │           ├── results/              # Test outputs
 │           └── artifacts/            # Build artifacts
-└── workspaces/{slug}/{configId}/     # Incremental build workspace
+├── builds/{slug}/groups/{groupId}.json   # Build groups (platforms sharing one root commit)
+├── deployments/{slug}/
+│   ├── index.json                    # Deployment summaries
+│   ├── {deploymentId}/
+│   │   ├── deployment.json
+│   │   ├── log.txt
+│   │   ├── results.txt               # item<TAB>status<TAB>message rows deploy.sh wrote
+│   │   ├── inputs/                   # Deploy files received from the agent (deleted after the run)
+│   │   └── output/                   # Files deploy.sh left in DEPLOY_OUTPUT_DIR (downloadable)
+│   └── promotions/{rootCommit}/{branch}.json  # Promotion journal per root commit and target branch
+└── git-cache/<hash>/                 # Bare caches: pin inspection/updates and promotion pushes
 ```
+
+Agents keep workspaces at `{workspaceRoot}/{slug}/{configId}/{platform}` and per-build
+`results/`, `artifacts/` and `deploy/` (whatever the build script leaves for a deployment; it must
+include `deploy.sh`) under `{buildsRoot}/{buildId}`.
 
 ## Build Execution Flow
 
 1. Build triggered via API → queued by BuildOrchestrator
-2. BuildExecutor resolves workspace: `{workspaces}/{slug}/{configId}`
+2. BuildExecutor resolves workspace: `{workspaces}/{slug}/{configId}/{platform}`
 3. Runs scripts via bash (Git Bash on Windows, Homebrew bash on macOS) with injected environment:
    - `GIT_URL`, `GIT_BRANCH`, `GIT_COMMIT`
    - `BUILD_NUMBER`, `BUILD_ID`, `CONFIGURATION_ID`
    - `PLATFORM` (target: win32/darwin/linux/ps5), `HOST_PLATFORM` (agent OS), `ARCH`
-   - `WORKSPACE`, `ARTIFACTS_DIR`, `RESULTS_DIR` (Unix paths)
+   - `WORKSPACE`, `ARTIFACTS_DIR`, `RESULTS_DIR`, `DEPLOY_DIR` (Unix paths)
+   - `GIT_COMMIT` is always the resolved root commit; submodules are checked out at the commits
+     it pins (recursively). The orchestrator fails a build whose reported root differs.
 4. Phases detected via `::phase::NAME` markers in script output
 5. Warnings/errors parsed via regex (MSVC, GCC, CMake patterns)
 6. Test results parsed from JSON files after completion
@@ -138,12 +161,24 @@ D:\BansheeForgeData/
 - `GET/PUT/DELETE /api/v1/projects/:slug` - Project CRUD
 - `GET/POST /api/v1/projects/:slug/configurations` - Configuration management
 - `GET/PUT /api/v1/projects/:slug/configurations/:id/scripts/:type` - Script management
+- `GET /api/v1/projects/:slug/pins?branch=` - Submodule pins of the branch head vs. the submodules' branch heads
+- `POST /api/v1/projects/:slug/pins/update` - Push pin commits (`{ branch, expectedRootCommit }`; 409 when the branch moved)
 
 ### Builds
-- `POST /api/v1/projects/:slug/builds` - Trigger builds (`platforms: []`, one build per platform; returns `{ builds }`)
+- `POST /api/v1/projects/:slug/builds` - Trigger builds (`platforms: []`, `autoDeploy?`; one build per platform; returns `{ builds, group }`)
+- `GET /api/v1/projects/:slug/groups/:groupId` - Build group (platforms sharing one root commit)
 - `GET /api/v1/builds/:id` - Get build details
 - `GET /api/v1/builds/:id/log` - Get full build log
 - `GET /api/v1/queue` - Get queue status
+
+### Deployments
+- `GET /api/v1/builds/:id/deploy-eligibility` - Whether the build may be deployed and why not
+- `POST /api/v1/builds/:id/deployments` - Deploy a build (`{ targetBranch?, parameters? }`; target defaults to the project's `deployBranch`, blank = no promotion; parameters follow the configuration's `deploySchema`)
+- `GET /api/v1/builds/:id/deployments`, `GET /api/v1/projects/:slug/deployments`
+- `GET /api/v1/deployments/:id`, `GET /api/v1/deployments/:id/log[?format=text]`
+- `POST /api/v1/deployments/:id/retry`, `POST /api/v1/deployments/:id/cancel`
+- `GET /api/v1/deployments/:id/artifacts/<path>` - Download a file `deploy.sh` left in its output directory
+- `POST /api/v1/agent/deployments/:id/files` (agent token) - Streamed upload of a recorded deploy file with `X-Relative-Path`, `X-Content-Sha256`, `Content-Length`
 
 ### Platforms & Agents
 - `GET /api/v1/platforms` - Platform list with agent availability
@@ -158,6 +193,7 @@ D:\BansheeForgeData/
 
 **Client → Server:**
 - `subscribe_build` / `unsubscribe_build` - Join/leave build room
+- `subscribe_deployment` / `unsubscribe_deployment` - Join/leave deployment room
 
 **Server → Client:**
 - `build:log` - Log lines batch
@@ -165,6 +201,15 @@ D:\BansheeForgeData/
 - `build:status` - Status change
 - `build:complete` - Build finished
 - `queue:updated` - Queue state changed
+- `deployment:updated` - Deployment record changed (broadcast)
+- `deployment:log` - Deployment log lines (room)
+- `deployment:finished` - Deployment reached a terminal state (broadcast)
+- `group:auto-deploy-skipped` - Auto deploy of a build group was skipped because a build failed
+
+**Orchestrator ↔ Agent (`/agents` namespace):** `build:assign` / `build:cancel`, `deploy:send-files`
+(agent streams the listed deploy files back over HTTP) answered by `agent:files-sent`,
+`agent:log|phase|complete|error`, `maintenance:artifact-usage` / `maintenance:purge-artifacts`
+(with `protectedBuildIds`). Nothing is executed on the agent for a deployment.
 
 ## Code Conventions
 
@@ -222,4 +267,15 @@ Server config in `config.json`:
 }
 ```
 
-Environment overrides: `DATA_PATH`, `PORT`
+Environment overrides: `DATA_PATH`, `PORT`, `DEPLOY_CREDENTIALS_FILE`, `MAX_DEPLOYMENT_UPLOAD_BYTES`.
+
+`config.json` also holds `deploy: { credentialsFile }`, editable under Settings → Deployment
+without a restart. The server reads only `GIT_TOKEN`/`GIT_USER` from that file; the rest is for
+`deploy.sh`. See `DEPLOYMENT.md` section 7 for pins, deployments and promotion.
+
+## Testing the Forge itself
+
+`pnpm -r run test` runs `node:test` suites: shared utilities (gitmodules parsing, platform-selection
+reducer), agent helpers (deploy file recording, workspace migration/locks) and server integration
+tests that inspect/update pins and promote branches against temporary local git repositories
+(`packages/server/test/`).

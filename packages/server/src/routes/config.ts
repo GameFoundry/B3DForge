@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import path from 'path';
 import type { ConfigResponse, ConfigUpdateResponse, ServerConfigUpdate } from '@banshee-forge/shared';
 import { ConfigService } from '../services/config-service.js';
 import { AuditLog } from '../auth/audit-log.js';
@@ -7,7 +8,7 @@ export function createConfigRoutes(configService: ConfigService, auditLog?: Audi
   const router = Router();
 
   // GET /api/v1/config - Get current configuration
-  router.get('/', (_req, res) => {
+  router.get('/', async (_req, res) => {
     try {
       const config = configService.getConfig();
       const response: ConfigResponse = {
@@ -15,6 +16,8 @@ export function createConfigRoutes(configService: ConfigService, auditLog?: Audi
         port: config.port,
         bindHost: config.bindHost,
         cookieSecure: config.cookieSecure,
+        deploy: config.deploy,
+        credentialsFileExists: await configService.credentialsFileExists(),
         configSource: configService.getSource(),
         pendingRestart: configService.hasPendingChanges(),
       };
@@ -42,14 +45,22 @@ export function createConfigRoutes(configService: ConfigService, auditLog?: Audi
         }
       }
 
+      if (updates.deploy?.credentialsFile && !path.isAbsolute(updates.deploy.credentialsFile)) {
+        res.status(400).json({ success: false, requiresRestart: false, message: 'Credentials file path must be absolute' } as ConfigUpdateResponse);
+        return;
+      }
+
       await configService.save(updates);
 
-      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'config.update', details: updates as Record<string, unknown> });
+      // The credentials file's contents never enter the log; only that the setting changed.
+      const { deploy, ...rest } = updates;
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'config.update', details: { ...rest, ...(deploy ? { deploy: { credentialsFile: deploy.credentialsFile } } : {}) } });
 
+      const requiresRestart = Object.keys(rest).length > 0;
       const response: ConfigUpdateResponse = {
         success: true,
-        requiresRestart: true,
-        message: 'Configuration saved. Restart the server to apply changes.',
+        requiresRestart,
+        message: requiresRestart ? 'Configuration saved. Restart the server to apply changes.' : 'Deployment settings saved.',
       };
       res.json(response);
     } catch (err) {

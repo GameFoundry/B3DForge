@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { AgentRegistry } from '../services/agent-registry.js';
+import { DeploymentService } from '../services/deployment-service.js';
 import { AuditLog } from '../auth/audit-log.js';
 
-export function createAgentRoutes(registry: AgentRegistry, auditLog: AuditLog): Router {
+export function createAgentRoutes(registry: AgentRegistry, deploymentService: DeploymentService, auditLog: AuditLog): Router {
 	const router = Router();
 
 	// GET /api/v1/agents — list connected agents
@@ -28,14 +29,16 @@ export function createAgentRoutes(registry: AgentRegistry, auditLog: AuditLog): 
 			return;
 		}
 		try {
-			res.json(await registry.requestArtifactUsage(req.params.id));
+			// Builds awaiting deployment are not purgeable, so the reported reclaimable size excludes them.
+			res.json(await registry.requestArtifactUsage(req.params.id, { protectedBuildIds: await deploymentService.protectedBuildIds() }));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Failed to measure artifacts';
 			res.status(502).json({ error: 'Agent request failed', message });
 		}
 	});
 
-	// POST /api/v1/agents/:id/artifacts/purge — delete artifacts for all non-running builds
+	// POST /api/v1/agents/:id/artifacts/purge — delete artifacts for all builds that are neither
+	// running nor awaiting a deployment
 	router.post('/agents/:id/artifacts/purge', async (req, res) => {
 		const agent = registry.get(req.params.id);
 		if (!agent) {
@@ -53,7 +56,8 @@ export function createAgentRoutes(registry: AgentRegistry, auditLog: AuditLog): 
 		});
 
 		try {
-			const result = await registry.purgeArtifacts(req.params.id);
+			const result = await registry.purgeArtifacts(req.params.id, { protectedBuildIds: await deploymentService.protectedBuildIds() });
+			await deploymentService.notePurgedBuilds(result.deletedBuildIds ?? []);
 			auditLog.append({
 				actor,
 				action: 'agent.artifacts.purge',

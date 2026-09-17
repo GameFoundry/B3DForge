@@ -96,6 +96,27 @@ export function useBuildNotifications() {
       }
     });
 
+    socket.on('deployment:finished', (data: { projectSlug: string; deploymentId: string; buildId: string; platform: string; status: string; error?: string }) => {
+      const target = getPlatformLabel(data.platform);
+      if (data.status === 'success') {
+        const title = `Deployment succeeded (${target})`;
+        toast.success(title, { description: data.projectSlug, duration: 6000 });
+        sendOsNotification(title, data.projectSlug);
+      } else if (data.status === 'failed') {
+        const title = `Deployment failed (${target})`;
+        const body = data.error ? `${data.projectSlug}: ${data.error}` : data.projectSlug;
+        toast.error(title, { description: body, duration: 10000 });
+        sendOsNotification(title, body);
+      }
+    });
+
+    socket.on('group:auto-deploy-skipped', (data: { projectSlug: string; groupId: string; reasons: string[] }) => {
+      const title = 'Auto deploy skipped';
+      const body = `${data.projectSlug}: ${data.reasons.join('; ')}`;
+      toast.warning(title, { description: body, duration: 10000 });
+      sendOsNotification(title, body);
+    });
+
     return () => {
       socket.disconnect();
     };

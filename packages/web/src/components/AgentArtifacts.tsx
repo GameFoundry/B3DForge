@@ -5,8 +5,10 @@ import { agentsApi } from '../api/client';
 /**
  * Disk used by an agent's local build artifacts, with a button to reclaim it.
  *
- * Artifacts are the install tree each build produces. They never leave the agent and nothing
- * reads them back, so they pile up at roughly one tree per build until purged manually.
+ * Artifacts are the install tree each build produces plus the dependency archives packaged for
+ * deployment. They stay on the agent until a deployment asks for them, so they pile up at
+ * roughly one tree per build until purged manually. Builds a pending deployment still needs are
+ * protected from the purge; a purged build can no longer be deployed.
  */
 export function AgentArtifacts({ agent }: { agent: AgentInfo }) {
 	const queryClient = useQueryClient();
@@ -53,7 +55,8 @@ export function AgentArtifacts({ agent }: { agent: AgentInfo }) {
 							`This frees ${formatBytes(usage.purgeableBytes)} across ${usage.purgeableCount} ` +
 							`build${usage.purgeableCount === 1 ? '' : 's'}.\n\n` +
 							`Build history, logs and test results are kept — only the local install ` +
-							`trees are removed. Running builds are skipped.`;
+							`trees and packaged dependencies are removed. Running builds and builds awaiting ` +
+							`deployment are skipped; purged builds can no longer be deployed.`;
 						if (confirm(message)) purgeMutation.mutate();
 					}}
 					disabled={purgeMutation.isPending || usage.purgeableCount === 0}
@@ -79,8 +82,13 @@ function PurgeSummary({ result }: { result: AgentPurgeArtifactsResult }) {
 			Freed {formatBytes(result.freedBytes)} from {result.deletedCount}{' '}
 			build{result.deletedCount === 1 ? '' : 's'}
 			{result.skippedBuildIds.length > 0 && (
-				<span className="text-gray-500">
-					{' '}· skipped {result.skippedBuildIds.length} running
+				<span className="text-gray-500" title={result.skippedBuildIds.join('\n')}>
+					{' '}· skipped {result.skippedBuildIds.length} running or awaiting deployment
+				</span>
+			)}
+			{(result.deletedBuildIds?.length ?? 0) > 0 && (
+				<span className="text-gray-500" title={result.deletedBuildIds.join('\n')}>
+					{' '}· {result.deletedBuildIds.length} no longer deployable
 				</span>
 			)}
 			{result.errors.length > 0 && (

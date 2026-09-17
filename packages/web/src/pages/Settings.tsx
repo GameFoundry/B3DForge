@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useServerConfig, useUpdateServerConfig, useValidateDataPath } from '../hooks/useConfig';
 import { AgentTokens } from '../components/AgentTokens';
+import { DeploySettings } from '../components/DeploySettings';
 
 export function Settings() {
   const { data: config, isLoading } = useServerConfig();
@@ -177,6 +178,9 @@ export function Settings() {
           )}
         </div>
       </div>
+
+      {/* Deployment */}
+      <DeploySettings />
 
       {/* Agent Tokens */}
       <AgentTokens />

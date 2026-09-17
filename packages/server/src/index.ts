@@ -36,11 +36,22 @@ import { createAgentDataRoutes } from './routes/agent-data.js';
 import { setupAgentNamespace } from './sockets/agent-namespace.js';
 import { AuditLog } from './auth/audit-log.js';
 import { runMigrations } from './migrate.js';
+import { BuildGroupRepository } from './repositories/build-group-repository.js';
+import { DeploymentRepository } from './repositories/deployment-repository.js';
+import { SubmodulePinService } from './services/submodule-pin-service.js';
+import { BuildTriggerService } from './services/build-trigger-service.js';
+import { ScriptResolver } from './services/script-resolver.js';
+import { PromotionService } from './services/promotion-service.js';
+import { DeploymentService } from './services/deployment-service.js';
+import { createDeploymentRoutes } from './routes/deployments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // App root is three directories up from compiled dist/src
 const APP_ROOT = path.join(__dirname, '..', '..', '..');
+
+/** Largest single file an agent may transfer for a deployment. */
+const MAX_DEPLOYMENT_UPLOAD_BYTES = Number(process.env.MAX_DEPLOYMENT_UPLOAD_BYTES) || 16 * 1024 ** 3;
 
 // Initialize config service and load configuration
 const configService = new ConfigService(APP_ROOT);
@@ -64,6 +75,8 @@ const buildRepo = new BuildRepository(storage);
 const testResultsRepo = new TestResultsRepository(storage);
 const referenceRepo = new ReferenceRepository(storage, DATA_PATH);
 const knownAgentsRepo = new KnownAgentsRepository(storage);
+const groupRepo = new BuildGroupRepository(storage);
+const deploymentRepo = new DeploymentRepository(storage);
 
 // Initialize auth repositories and middleware
 const usersRepo = new UsersRepository(storage);
@@ -116,18 +129,35 @@ const orchestrator = new BuildOrchestrator(io, buildRepo, projectRepo, testResul
   dataPath: DATA_PATH,
 });
 const agentRegistry = new AgentRegistry();
+const scriptResolver = new ScriptResolver(DATA_PATH);
 const agentDispatcher = new AgentDispatcher(
   orchestrator.getQueue(),
   agentRegistry,
   orchestrator,
   buildRepo,
   projectRepo,
-  { dataPath: DATA_PATH },
+  scriptResolver,
 );
 orchestrator.setDispatcher(agentDispatcher);
 
+// Submodule pins, build groups and deployments
+const pinService = new SubmodulePinService(DATA_PATH);
+const triggerService = new BuildTriggerService(buildRepo, groupRepo, orchestrator, pinService);
+const promotionService = new PromotionService(pinService, deploymentRepo);
+const deploymentService = new DeploymentService(
+  io,
+  deploymentRepo,
+  buildRepo,
+  groupRepo,
+  projectRepo,
+  agentRegistry,
+  configService,
+  promotionService,
+);
+orchestrator.onBuildFinished(build => deploymentService.onBuildFinished(build));
+
 // Initialize git polling service
-const pollingService = new GitPollingService(projectRepo, buildRepo, orchestrator, io);
+const pollingService = new GitPollingService(projectRepo, triggerService, orchestrator, io);
 
 // Public auth endpoints (login is rate-limited inside; /me is self-gated)
 app.use('/api/v1/auth', createAuthRoutes(usersRepo, sessionsRepo, { cookieSecure: config.cookieSecure }));
@@ -138,14 +168,21 @@ app.get('/api/health', (_req, res) => {
 });
 
 // Agent data uploads use bearer-token auth (requireAgent), so mount before requireUser.
-app.use('/api/v1/agent', createAgentDataRoutes({ dataPath: DATA_PATH }, requireAgent));
+app.use('/api/v1/agent', createAgentDataRoutes({
+  dataPath: DATA_PATH,
+  maxDeploymentUploadBytes: MAX_DEPLOYMENT_UPLOAD_BYTES,
+  deploymentRepo,
+  projectRepo,
+  deploymentService,
+}, requireAgent));
 
 // All API endpoints below this line require an authenticated user
 app.use('/api/v1', requireUser);
 
-app.use('/api/v1/projects', createProjectRoutes(projectRepo, pollingService, auditLog));
-app.use('/api/v1', createBuildRoutes(buildRepo, projectRepo, orchestrator, auditLog));
-app.use('/api/v1', createAgentRoutes(agentRegistry, auditLog));
+app.use('/api/v1/projects', createProjectRoutes(projectRepo, pollingService, auditLog, { pins: pinService, configService }));
+app.use('/api/v1', createBuildRoutes(buildRepo, groupRepo, projectRepo, orchestrator, triggerService, auditLog));
+app.use('/api/v1', createDeploymentRoutes(deploymentRepo, buildRepo, projectRepo, deploymentService, auditLog));
+app.use('/api/v1', createAgentRoutes(agentRegistry, deploymentService, auditLog));
 app.use('/api/v1', createPlatformRoutes(agentRegistry, knownAgentsRepo, auditLog));
 app.use('/api/v1/agent-tokens', createAgentTokenRoutes(agentTokensRepo, auditLog));
 app.use('/api/v1/config', createConfigRoutes(configService, auditLog));
@@ -192,7 +229,7 @@ if (webClientExists) {
 }
 
 // Wire up the /agents namespace (bearer-token authed) for agent connections.
-setupAgentNamespace(io, agentTokensRepo, agentRegistry, agentDispatcher, orchestrator, knownAgentsRepo);
+setupAgentNamespace(io, agentTokensRepo, agentRegistry, agentDispatcher, orchestrator, knownAgentsRepo, deploymentService);
 
 // Authenticate every Socket.IO connection via the session cookie
 io.use(async (socket, next) => {
@@ -222,6 +259,14 @@ io.on('connection', (socket) => {
     socket.leave(`build:${buildId}`);
   });
 
+  socket.on('subscribe_deployment', (deploymentId: string) => {
+    socket.join(`deployment:${deploymentId}`);
+  });
+
+  socket.on('unsubscribe_deployment', (deploymentId: string) => {
+    socket.leave(`deployment:${deploymentId}`);
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
@@ -234,6 +279,9 @@ export { io, projectRepo, buildRepo, orchestrator, pollingService, testResultsSe
 async function start() {
   // Initialize orchestrator (recover pending builds)
   await orchestrator.initialize();
+
+  // Re-queue pending deployments, fail interrupted ones
+  await deploymentService.initialize();
 
   // Start git polling for auto-builds
   await pollingService.initialize();

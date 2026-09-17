@@ -1,12 +1,8 @@
-import { promises as fs } from 'fs';
-import path from 'path';
 import type {
 	Build,
 	BuildConfiguration,
 	BuildAssignment,
 	Project,
-	ScriptConfig,
-	ScriptPayload,
 } from '@banshee-forge/shared';
 import { DEFAULT_PLATFORM } from '@banshee-forge/shared';
 import { BuildQueue } from './build-queue.js';
@@ -14,10 +10,7 @@ import { AgentRegistry, RegisteredAgent } from './agent-registry.js';
 import { BuildRepository } from '../repositories/build-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { BuildOrchestrator } from './build-orchestrator.js';
-
-export interface DispatcherConfig {
-	dataPath: string;
-}
+import { ScriptResolver } from './script-resolver.js';
 
 interface Assignment {
 	buildId: string;
@@ -46,7 +39,7 @@ export class AgentDispatcher {
 		private orchestrator: BuildOrchestrator,
 		private buildRepo: BuildRepository,
 		private projectRepo: ProjectRepository,
-		private config: DispatcherConfig,
+		private scripts: ScriptResolver,
 	) {
 		this.queue.on('queue:enqueued', () => { void this.tryDispatch(); });
 		this.registry.on('available', () => { void this.tryDispatch(); });
@@ -205,29 +198,14 @@ export class AgentDispatcher {
 	): Promise<BuildAssignment | null> {
 		if (!configuration) return null;
 
-		// Fetch script resolution: per-configuration when `overrideFetchScript`
-		// is set, otherwise the shared project-level fetch script.
-		const fetchPath = configuration.overrideFetchScript
-			? path.join(this.config.dataPath, 'projects', project.slug, 'configs', configuration.id, 'fetch.sh')
-			: path.join(this.config.dataPath, 'projects', project.slug, 'fetch.sh');
-		const fetch = await this.readToInline(fetchPath);
+		const fetch = await this.scripts.fetchScript(project, configuration);
 		if (!fetch || fetch.kind !== 'inline') return null;
 
-		const buildScript = await this.scriptToPayload(
-			configuration.buildScript,
-			project.slug,
-			configuration.id,
-			'build.sh',
-		);
+		const buildScript = await this.scripts.scriptPayload(configuration.buildScript, project.slug, configuration.id, 'build.sh');
 		if (!buildScript) return null;
 
 		const testScript = configuration.testScript
-			? await this.scriptToPayload(
-				configuration.testScript,
-				project.slug,
-				configuration.id,
-				'test.sh',
-			)
+			? await this.scripts.scriptPayload(configuration.testScript, project.slug, configuration.id, 'test.sh')
 			: undefined;
 
 		return {
@@ -240,44 +218,5 @@ export class AgentDispatcher {
 				...(testScript ? { test: testScript } : {}),
 			},
 		};
-	}
-
-	private async scriptToPayload(
-		config: ScriptConfig,
-		projectSlug: string,
-		configurationId: string,
-		defaultFilename: string,
-	): Promise<ScriptPayload | null> {
-		switch (config.source) {
-			case 'repo': {
-				if (!config.repoPath) return null;
-				return { kind: 'repo', repoPath: config.repoPath };
-			}
-			case 'custom': {
-				if (!config.customPath) return null;
-				return await this.readToInline(config.customPath);
-			}
-			case 'local':
-			default: {
-				const localPath = path.join(
-					this.config.dataPath,
-					'projects',
-					projectSlug,
-					'configs',
-					configurationId,
-					defaultFilename,
-				);
-				return await this.readToInline(localPath);
-			}
-		}
-	}
-
-	private async readToInline(filePath: string): Promise<ScriptPayload | null> {
-		try {
-			const body = await fs.readFile(filePath, 'utf-8');
-			return { kind: 'inline', body };
-		} catch {
-			return null;
-		}
 	}
 }

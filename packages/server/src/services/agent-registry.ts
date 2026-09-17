@@ -4,11 +4,13 @@ import type {
 	AgentAck,
 	AgentArtifactUsage,
 	AgentInfo,
+	AgentPurgeArtifactsRequest,
 	AgentPurgeArtifactsResult,
 	AgentRegistration,
 	AgentStatus,
 	BuildAssignment,
 	BuildCancelEvent,
+	DeployFilesRequest,
 } from '@banshee-forge/shared';
 import { generateId } from '@banshee-forge/shared';
 
@@ -118,6 +120,20 @@ export class AgentRegistry extends EventEmitter {
 		return this.agents.get(agentId) ?? null;
 	}
 
+	/**
+	 * Find a connected agent by its registered name, the identity that survives reconnects. When
+	 * several connections share a name (a restarted agent whose old socket has not timed out yet),
+	 * the most recently connected one is returned.
+	 */
+	findByName(name: string): RegisteredAgent | null {
+		let found: RegisteredAgent | null = null;
+		for (const agent of this.agents.values()) {
+			if (agent.info.name !== name) continue;
+			if (!found || agent.info.connectedAt > found.info.connectedAt) found = agent;
+		}
+		return found;
+	}
+
 	list(): AgentInfo[] {
 		return Array.from(this.agents.values()).map(a => a.info);
 	}
@@ -176,31 +192,39 @@ export class AgentRegistry extends EventEmitter {
 		return true;
 	}
 
+	/** Ask an agent to transfer the deploy files of a build it produced. */
+	sendFilesRequest(agentId: string, payload: DeployFilesRequest): boolean {
+		const agent = this.agents.get(agentId);
+		if (!agent) return false;
+		agent.socket.emit('deploy:send-files', payload);
+		return true;
+	}
+
 	/** Measure the disk taken by the agent's local per-build artifact directories. */
-	requestArtifactUsage(agentId: string): Promise<AgentArtifactUsage> {
-		return this.request<AgentArtifactUsage>(agentId, 'maintenance:artifact-usage');
+	requestArtifactUsage(agentId: string, request: AgentPurgeArtifactsRequest = { protectedBuildIds: [] }): Promise<AgentArtifactUsage> {
+		return this.request<AgentArtifactUsage>(agentId, 'maintenance:artifact-usage', request);
 	}
 
 	/**
-	 * Delete the agent's artifact directories for every build that isn't currently running.
-	 * Artifacts are never uploaded or served, so this only reclaims disk — no build history,
-	 * log or test result is affected.
+	 * Delete the agent's artifact directories for every build that isn't currently running or
+	 * named in `protectedBuildIds` (builds a deployment still needs). Artifacts are otherwise
+	 * never served, so this only reclaims disk — no build history, log or test result is affected.
 	 */
-	purgeArtifacts(agentId: string): Promise<AgentPurgeArtifactsResult> {
-		return this.request<AgentPurgeArtifactsResult>(agentId, 'maintenance:purge-artifacts');
+	purgeArtifacts(agentId: string, request: AgentPurgeArtifactsRequest): Promise<AgentPurgeArtifactsResult> {
+		return this.request<AgentPurgeArtifactsResult>(agentId, 'maintenance:purge-artifacts', request);
 	}
 
 	/**
 	 * Send a request to an agent and await its acknowledgement. Rejects if the agent isn't
 	 * connected, reports an error, or doesn't answer within {@link MAINTENANCE_TIMEOUT_MS}.
 	 */
-	private async request<T>(agentId: string, event: string): Promise<T> {
+	private async request<T>(agentId: string, event: string, payload: unknown): Promise<T> {
 		const agent = this.agents.get(agentId);
 		if (!agent) throw new Error('Agent is not connected');
 
 		const response = await agent.socket
 			.timeout(MAINTENANCE_TIMEOUT_MS)
-			.emitWithAck(event, {}) as AgentAck<T> | undefined;
+			.emitWithAck(event, payload) as AgentAck<T> | undefined;
 
 		if (!response) throw new Error('Agent returned an empty response');
 		if (!response.ok) throw new Error(response.error);

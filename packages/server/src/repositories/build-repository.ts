@@ -7,6 +7,11 @@ interface BuildsFile {
   nextBuildNumber: number;
 }
 
+/** Group membership recorded on a build at creation. */
+export interface BuildGroupMembership {
+  groupId: string;
+}
+
 export class BuildRepository {
   constructor(private storage: JsonFileStorage) {}
 
@@ -42,7 +47,8 @@ export class BuildRepository {
     input: CreateBuildInput,
     triggerType: TriggerType,
     configurationName = 'default',
-    platform: string = DEFAULT_PLATFORM
+    platform: string = DEFAULT_PLATFORM,
+    membership?: BuildGroupMembership
   ): Promise<Build> {
     const buildsPath = this.buildsFilePath(projectSlug);
     const data = await this.storage.read<BuildsFile>(buildsPath, { builds: [], nextBuildNumber: 1 });
@@ -69,6 +75,7 @@ export class BuildRepository {
       errorCount: 0,
       phases: [],
       startedAt: now,
+      ...(membership ? { groupId: membership.groupId } : {}),
     };
 
     // Update builds list
@@ -88,6 +95,7 @@ export class BuildRepository {
       warningCount: 0,
       errorCount: 0,
       startedAt: now,
+      groupId: membership?.groupId,
     };
 
     data.builds.push(summary);
@@ -181,6 +189,7 @@ export class BuildRepository {
       testSummary: build.testSummary,
       agentId: build.agentId,
       agentName: build.agentName,
+      groupId: build.groupId,
     };
   }
 

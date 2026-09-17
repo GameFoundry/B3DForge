@@ -9,11 +9,21 @@ import type {
   AuthMeResponse, LoginRequest,
   AgentInfo, AgentTokenPublic, AgentArtifactUsage, AgentPurgeArtifactsResult,
   KnownAgent, PlatformAvailability,
+  BuildGroup, Deployment, DeploymentEligibility, CreateDeploymentInput,
+  PinInspection, UpdatePinsInput, UpdatePinsResult,
 } from '@banshee-forge/shared';
 
 export interface ScriptResponse {
   script: string;
   source: ScriptSource;
+}
+
+/** Thrown when a pin update is refused because a branch moved since it was inspected. */
+export class PinConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PinConflictError';
+  }
 }
 
 const API_BASE = '/api/v1';
@@ -45,6 +55,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+    if (response.status === 409) throw new PinConflictError(error.message || 'Conflict');
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
@@ -109,6 +120,14 @@ export const projectsApi = {
       method: 'DELETE'
     }),
 
+  // Submodule pins
+  inspectPins: (slug: string, branch: string, commit?: string) =>
+    fetchJson<PinInspection>(`${API_BASE}/projects/${slug}/pins?branch=${encodeURIComponent(branch)}${commit ? `&commit=${encodeURIComponent(commit)}` : ''}`),
+  updatePins: (slug: string, input: UpdatePinsInput) =>
+    fetchJson<UpdatePinsResult>(`${API_BASE}/projects/${slug}/pins/update`, {
+      method: 'POST', body: JSON.stringify(input)
+    }),
+
   // Polling endpoints
   getPollingStatus: (slug: string) =>
     fetchJson<PollingStatus>(`${API_BASE}/projects/${slug}/polling-status`),
@@ -149,6 +168,33 @@ export const buildsApi = {
     ),
   /** URL of the complete log as plain text, for when the parsed view is truncated. */
   getRawLogUrl: (id: string) => `${API_BASE}/builds/${id}/log?format=text`,
+  /** The multi-platform group a build was triggered with. */
+  getGroup: (projectSlug: string, groupId: string) =>
+    fetchJson<BuildGroup>(`${API_BASE}/projects/${projectSlug}/groups/${groupId}`),
+};
+
+// Deployments API
+export const deploymentsApi = {
+  getEligibility: (buildId: string) =>
+    fetchJson<DeploymentEligibility>(`${API_BASE}/builds/${buildId}/deploy-eligibility`),
+  create: (buildId: string, input: CreateDeploymentInput = {}) =>
+    fetchJson<Deployment>(`${API_BASE}/builds/${buildId}/deployments`, {
+      method: 'POST', body: JSON.stringify(input)
+    }),
+  listForBuild: (buildId: string) =>
+    fetchJson<{ deployments: Deployment[] }>(`${API_BASE}/builds/${buildId}/deployments`),
+  listForProject: (projectSlug: string) =>
+    fetchJson<{ deployments: Deployment[] }>(`${API_BASE}/projects/${projectSlug}/deployments`),
+  get: (id: string) => fetchJson<Deployment>(`${API_BASE}/deployments/${id}`),
+  getParsedLog: (id: string) =>
+    fetchJson<{ lines: LogLine[]; totalLines: number }>(`${API_BASE}/deployments/${id}/log`),
+  getRawLogUrl: (id: string) => `${API_BASE}/deployments/${id}/log?format=text`,
+  retry: (id: string) =>
+    fetchJson<Deployment>(`${API_BASE}/deployments/${id}/retry`, { method: 'POST' }),
+  cancel: (id: string) =>
+    fetchJson<{ success: boolean }>(`${API_BASE}/deployments/${id}/cancel`, { method: 'POST' }),
+  getArtifactUrl: (id: string, artifactPath: string) =>
+    `${API_BASE}/deployments/${id}/artifacts/${artifactPath.split('/').map(encodeURIComponent).join('/')}`,
 };
 
 // Queue API

@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { LogLine, BuildPhase, BuildStatus } from '@banshee-forge/shared';
 import { getPlatformLabel } from '@banshee-forge/shared';
 import { useBuild, useParsedBuildLog, useCancelBuild } from '../hooks/useBuilds';
+import { useProject } from '../hooks/useProjects';
 import { useBuildSocket } from '../hooks/useBuildSocket';
 import { useTestResults } from '../hooks/useTestResults';
 import { buildsApi } from '../api/client';
@@ -12,8 +13,9 @@ import { LogViewer } from '../components/LogViewer';
 import { PhaseTimeline } from '../components/PhaseTimeline';
 import { UnitTestResults } from '../components/UnitTestResults';
 import { SnapshotTestResults } from '../components/SnapshotTestResults';
+import { DeployPanel } from '../components/DeployPanel';
 
-type MainTab = 'info' | 'logs' | 'unit' | 'snapshots';
+type MainTab = 'info' | 'logs' | 'unit' | 'snapshots' | 'deploy';
 
 export function BuildDetail() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +24,9 @@ export function BuildDetail() {
   const { data: parsedLog, isLoading: isLogLoading, isFetching: isLogFetching, refetch: refetchLog } = useParsedBuildLog(id!);
   const { data: testResults } = useTestResults(id!);
   const cancelBuild = useCancelBuild();
+  // The configuration declares the deploy parameters the Deploy tab asks for.
+  const { data: project } = useProject(build?.projectSlug ?? '');
+  const configuration = project?.configurations?.find(c => c.id === build?.configurationId);
 
   // Tab state
   const [activeTab, setActiveTab] = useState<MainTab>('logs');
@@ -251,6 +256,11 @@ export function BuildDetail() {
             <span className="text-xs px-2 py-0.5 bg-gray-700 text-gray-200 rounded" title={`Platform: ${build.platform}`}>
               {getPlatformLabel(build.platform)}
             </span>
+            {build.groupId && (
+              <span className="text-xs px-2 py-0.5 bg-gray-700 text-gray-400 rounded font-mono" title={`Build group ${build.groupId}; every platform of the group builds the same commit`}>
+                group {build.groupId.slice(-6)}
+              </span>
+            )}
             {build.agentName && (
               <span className="text-xs px-2 py-0.5 bg-purple-900/50 text-purple-300 rounded" title={`Agent ID: ${build.agentId}`}>
                 on {build.agentName}
@@ -387,6 +397,16 @@ export function BuildDetail() {
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setActiveTab('deploy')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'deploy'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
+                }`}
+              >
+                Deploy
+              </button>
             </nav>
           </div>
 
@@ -410,6 +430,14 @@ export function BuildDetail() {
                     <dd className={build.cleanBuild ? 'text-orange-300' : 'text-cyan-300'}>
                       {build.cleanBuild ? 'Clean (fresh)' : 'Incremental (reused)'}
                     </dd>
+                    {build.testResultsComplete !== undefined && (
+                      <>
+                        <dt className="text-gray-500">Test results</dt>
+                        <dd className={build.testResultsComplete && build.resultsUploadComplete !== false ? 'text-green-300' : 'text-yellow-300'}>
+                          {build.testResultsComplete && build.resultsUploadComplete !== false ? 'Complete' : 'Incomplete'}
+                        </dd>
+                      </>
+                    )}
                     {build.config && Object.keys(build.config).length > 0 && (
                       <>
                         {Object.entries(build.config).map(([key, value]) => (
@@ -479,6 +507,10 @@ export function BuildDetail() {
                   </div>
                 )}
               </div>
+            )}
+
+            {activeTab === 'deploy' && build && (
+              <DeployPanel build={build} configuration={configuration} />
             )}
 
             {activeTab === 'snapshots' && build && (

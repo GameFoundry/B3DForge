@@ -1,4 +1,18 @@
 /**
+ * Deployment settings. The credentials file never leaves the orchestrator: agents only send
+ * files, the orchestrator runs `deploy.sh` and pushes promoted branches.
+ */
+export interface DeploySettings {
+	/**
+	 * Absolute path, on the orchestrator's disk, of a key=value credentials file. The
+	 * orchestrator reads only `GIT_TOKEN` (and optionally `GIT_USER`) from it, for pushing
+	 * promoted branches over HTTPS; every other key is opaque to it and left for `deploy.sh`,
+	 * which receives the path as `DEPLOY_CREDENTIALS_FILE`.
+	 */
+	credentialsFile?: string;
+}
+
+/**
  * Server configuration
  */
 export interface ServerConfig {
@@ -15,6 +29,8 @@ export interface ServerConfig {
    * (i.e. when behind a TLS-terminating reverse proxy).
    */
   cookieSecure: boolean;
+  /** Applied immediately when saved; no restart needed. */
+  deploy: DeploySettings;
 }
 
 /**
@@ -25,6 +41,7 @@ export interface ServerConfigUpdate {
   port?: number;
   bindHost?: string;
   cookieSecure?: boolean;
+  deploy?: Partial<DeploySettings>;
 }
 
 /**
@@ -40,6 +57,9 @@ export interface ConfigResponse {
   port: number;
   bindHost: string;
   cookieSecure: boolean;
+  deploy: DeploySettings;
+  /** Whether the credentials file currently exists on the orchestrator's disk. */
+  credentialsFileExists: boolean;
   configSource: ConfigSource;
   pendingRestart: boolean;
 }

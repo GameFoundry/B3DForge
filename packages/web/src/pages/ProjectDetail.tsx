@@ -87,8 +87,12 @@ export function ProjectDetail() {
               </dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-gray-500">Branch</dt>
-              <dd className="text-gray-300">{project.gitBranch}</dd>
+              <dt className="text-gray-500">Build Branch</dt>
+              <dd className="text-gray-300 font-mono">{project.gitBranch}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-gray-500">Default Deploy Branch</dt>
+              <dd className="text-gray-300 font-mono">{project.deployBranch ?? 'master'}</dd>
             </div>
             {project.lastCommit && (
               <div className="flex justify-between">

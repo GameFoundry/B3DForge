@@ -42,6 +42,22 @@ export type ConfigSchema = Record<string, ConfigSchemaField>;
 /** Project configuration values */
 export type ProjectConfig = Record<string, string | boolean | number>;
 
+/** A parameter `deploy.sh` accepts, entered in the Deploy panel and passed as an environment variable. */
+export interface DeploySchemaField {
+  type: 'string' | 'boolean' | 'select';
+  options?: string[];
+  default?: string | boolean;
+  label?: string;
+  description?: string;
+  /** Regular expression (without delimiters) a string value must match when it is not blank. */
+  pattern?: string;
+  /** When true a blank value blocks the deployment. */
+  required?: boolean;
+}
+
+/** Deploy parameters of a configuration, keyed by the environment variable name. */
+export type DeploySchema = Record<string, DeploySchemaField>;
+
 /** Script source options */
 export type ScriptSource = 'repo' | 'local' | 'custom';
 
@@ -83,6 +99,12 @@ export interface BuildConfiguration {
   configSchema?: ConfigSchema;       // Custom options for this config
   defaultConfig?: ProjectConfig;     // Default values
 
+  /**
+   * Parameters the Deploy panel asks for and passes to the build's `deploy.sh` as uppercased
+   * environment variables (e.g. `FRAMEWORK_VERSION`). Empty when the script needs none.
+   */
+  deploySchema?: DeploySchema;
+
   // Settings
   timeoutMs?: number;                // Override default timeout
   forceCleanBuild?: boolean;         // If true, always wipe workspace before build
@@ -119,7 +141,13 @@ export interface Project {
   slug: string;
   description: string;
   gitUrl: string;
+  /** Branch builds are made from. Submodules are built at the commits the root commit pins. */
   gitBranch: string;
+  /**
+   * Default promotion target offered when deploying a build. Blank disables promotion by
+   * default. Defaults to {@link DEFAULT_DEPLOY_BRANCH} for new projects.
+   */
+  deployBranch?: string;
 
   // Multiple build configurations
   configurations: BuildConfiguration[];
@@ -145,6 +173,12 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
 }
+
+/** Branch deployments promote to when a project does not name one. */
+export const DEFAULT_DEPLOY_BRANCH = 'master';
+
+/** Branch new projects build from when none is given. */
+export const DEFAULT_STAGING_BRANCH = 'staging';
 
 /** Project creation input (without auto-generated fields) */
 export type CreateProjectInput = Omit<Project, 'id' | 'createdAt' | 'updatedAt'>;

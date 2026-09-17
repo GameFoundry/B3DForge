@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useCreateProject } from '../hooks/useProjects';
 import type { CreateProjectInput, BuildConfiguration, ConfigSchema, ProjectConfig } from '@banshee-forge/shared';
+import { DEFAULT_DEPLOY_BRANCH, DEFAULT_STAGING_BRANCH } from '@banshee-forge/shared';
 
 export function CreateProject() {
   const navigate = useNavigate();
@@ -10,7 +11,9 @@ export function CreateProject() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [gitUrl, setGitUrl] = useState('');
-  const [gitBranch, setGitBranch] = useState('master');
+  // Builds come from the staging branch; deployments promote it to the deploy branch.
+  const [gitBranch, setGitBranch] = useState<string>(DEFAULT_STAGING_BRANCH);
+  const [deployBranch, setDeployBranch] = useState<string>(DEFAULT_DEPLOY_BRANCH);
 
   const generateSlug = (name: string) => {
     return name
@@ -62,6 +65,7 @@ export function CreateProject() {
       description,
       gitUrl,
       gitBranch,
+      deployBranch: deployBranch.trim() || DEFAULT_DEPLOY_BRANCH,
       configurations: [defaultConfiguration],
       autoBuild: false,
       pollInterval: 300,
@@ -136,15 +140,29 @@ export function CreateProject() {
             </p>
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Branch</label>
-            <input
-              type="text"
-              value={gitBranch}
-              onChange={(e) => setGitBranch(e.target.value)}
-              placeholder="master"
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Build Branch</label>
+              <input
+                type="text"
+                value={gitBranch}
+                onChange={(e) => setGitBranch(e.target.value)}
+                placeholder={DEFAULT_STAGING_BRANCH}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">Branch CI builds and tests; every submodule with a branch of this name follows it.</p>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Default Deploy Branch</label>
+              <input
+                type="text"
+                value={deployBranch}
+                onChange={(e) => setDeployBranch(e.target.value)}
+                placeholder={DEFAULT_DEPLOY_BRANCH}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">Offered as the target when deploying; each deployment can pick another branch.</p>
+            </div>
           </div>
         </div>
 

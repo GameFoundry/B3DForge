@@ -1,6 +1,7 @@
 import type { Build, BuildPhase, RepositoryCommitInfo } from './build.js';
 import type { BuildConfiguration, Project } from './project.js';
 import type { LogLine, BuildErrorCode } from './execution.js';
+import type { BuildDeploymentInputs, DeploymentFile } from './deployment.js';
 
 /** Operating system platforms supported by build agents. */
 export type AgentPlatform = 'win32' | 'linux' | 'darwin';
@@ -151,6 +152,10 @@ export interface AgentCompleteEvent {
 	 * parsing the snapshot results tree.
 	 */
 	snapshotCategories: string[];
+	/** False when at least one result file failed to upload; such a build cannot prove its test outcome. */
+	resultsUploadComplete: boolean;
+	/** Deploy files left on the agent for a later deployment. */
+	deploymentInputs?: BuildDeploymentInputs;
 }
 
 /** Payload of `agent:error` event. */
@@ -163,6 +168,33 @@ export interface AgentErrorEvent {
 /** Payload of `build:cancel` event sent from orchestrator to agent. */
 export interface BuildCancelEvent {
 	buildId: string;
+}
+
+/**
+ * Orchestrator→agent request (`deploy:send-files`) to transfer a finished build's deploy files
+ * to the orchestrator over `POST /api/v1/agent/deployments/:id/files`.
+ */
+export interface DeployFilesRequest {
+	deploymentId: string;
+	projectSlug: string;
+	buildId: string;
+	/** Paths (relative to the build's deploy directory) the orchestrator expects, with the recorded hashes. */
+	files: DeploymentFile[];
+}
+
+/** Payload of `agent:files-sent`, reported once every requested file was transferred or one failed. */
+export interface AgentFilesSentEvent {
+	deploymentId: string;
+	status: 'success' | 'failed';
+	/** Files that reached the orchestrator, with the checksums the agent computed. */
+	sent: DeploymentFile[];
+	error?: string;
+}
+
+/** Payload of `maintenance:purge-artifacts`. */
+export interface AgentPurgeArtifactsRequest {
+	/** Builds whose artifacts a pending or running deployment still needs; never purged. */
+	protectedBuildIds: string[];
 }
 
 /**
@@ -179,7 +211,7 @@ export interface AgentArtifactUsage {
 	totalBytes: number;
 	/** Number of builds that have an artifacts directory on disk. */
 	buildCount: number;
-	/** Bytes a purge would reclaim, i.e. excluding builds that are currently running. */
+	/** Bytes a purge would reclaim, i.e. excluding builds that are running or awaiting deployment. */
 	purgeableBytes: number;
 	/** Number of artifact directories a purge would delete. */
 	purgeableCount: number;
@@ -200,8 +232,10 @@ export interface AgentPurgeArtifactsResult {
 	deletedCount: number;
 	/** Bytes reclaimed, measured before deletion. */
 	freedBytes: number;
-	/** Builds skipped because they were running at the time of the purge. */
+	/** Builds skipped because they were running or protected by a deployment at the time of the purge. */
 	skippedBuildIds: string[];
+	/** Builds whose artifacts were deleted; they can no longer be deployed. */
+	deletedBuildIds: string[];
 	/** Human-readable failures (e.g. locked files); a non-empty list still means a partial purge ran. */
 	errors: string[];
 }

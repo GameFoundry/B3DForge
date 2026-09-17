@@ -452,13 +452,181 @@ pm2 save
 - **TLS**: `https://` URLs use `wss://` for the WebSocket leg; the cert is
   validated by Node's defaults. If you're behind a private CA, set
   `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` in the agent's environment.
-- **Artifacts and test results stay on the agent's disk** in v1 — they are not
-  uploaded back to the orchestrator. The build's log lines and phase timings
-  *are* streamed back, so the dashboard reflects status correctly. Plan to ship
-  artifacts elsewhere from inside your `build.sh` if you need them centrally
-  available (e.g. push to S3 / shared storage from the script).
+- **Artifacts stay on the agent's disk** — the install tree and the
+  dependency archives a build packaged wait under `{buildsRoot}/{buildId}/`
+  until a deployment asks for them (see section 7). Test results are uploaded
+  at the end of every build. The Agents page can purge artifacts; builds a
+  pending deployment still needs are skipped, and a purged build can no longer
+  be deployed (re-run it instead).
 
-## 7. Audit log
+## 7. Branches, pins and deployments
+
+Builds come from the project's build branch (or a configuration's override,
+or the branch typed into Trigger Build). The root commit of that branch
+defines the whole tree: every submodule, recursively, is built at the commit
+its parent pins. Submodules never follow a branch of their own. A
+**deployment** transfers the files a successful, fully tested build left in
+its deploy directory to the server, runs the build's own `deploy.sh` there,
+and optionally promotes the tested commits to a target branch.
+
+Nothing about `staging` is hardcoded. Where the branches live:
+
+| Setting | Where |
+| --- | --- |
+| Build branch (project default) | Project page → Repository → *Build Branch* (edit) |
+| Build branch per configuration | Project page → Configurations → *Branch* override |
+| Build branch for one run | Trigger Build → *Branch* |
+| Default deploy target (blank = none) | Project page → Repository → *Default Deploy Branch* |
+| Deploy target for one deployment | Build → Deploy tab → *Target branch* |
+| Branches polled for changes | Project page → Automation → watched repositories |
+
+### Submodule pins
+
+Pressing **Trigger Build** first compares every submodule pin of the branch
+head with the head of the submodule's branch (the build branch when the
+submodule's remote has it, else the branch its `.gitmodules` entry names;
+a submodule with neither is not checked). Stale pins are listed with two
+choices:
+
+- **Update pins and build** — the server writes a pin commit per affected
+  repository, children first (Framework pins its submodules, then the editor
+  pins Framework), pushes each with a plain push, and builds the new root
+  head. A push the remote rejects means someone pushed meanwhile: nothing
+  else is pushed, the list is refreshed, and you decide again. Nothing is
+  ever force-pushed.
+- **Build as pinned** — builds the tree exactly as the root commit pins it.
+
+Polled builds always build the pins as-is; nothing updates pins on its own.
+A build for an explicitly typed commit can only be built as pinned.
+
+### One-time repository setup
+
+Every repository in the tree (editor, framework, examples, code generator,
+forge, doc generator, platform overlays) needs the build branch (`staging`)
+on its remote. The script creates the missing ones from the deploy branch:
+
+```bash
+# Dry run first: lists the repositories and what would change
+Framework/Scripts/B3DSetupStaging.sh --dry-run
+
+# Create remote staging branches (from master) and local tracking branches
+Framework/Scripts/B3DSetupStaging.sh --checkout
+```
+
+Developers push to `staging`; the orchestrator moves `master`.
+
+### Move an existing project to the staging layout
+
+All of it is done from the project page:
+
+1. **Configurations → Repository**: set *Build Branch* to `staging` and
+   *Default Deploy Branch* to `master` (or change the branch override of the
+   configuration you build instead).
+2. **Automation**: point each watched repository at `staging` so polling
+   triggers on pushes to it.
+3. **Configurations → Project Fetch Script**: paste the current
+   `Framework/Scripts/CI/B3DCIFetch.sh` and **Save**. A stored script that
+   moves submodules to branch heads must be replaced: the orchestrator fails
+   any build whose root is not the commit it asked for, and a build of
+   unpinned submodules cannot be promoted faithfully.
+4. **Configurations → edit → Deploy parameters** (framework configuration
+   only): add `FRAMEWORK_VERSION`, type string, pattern
+   `^v\d+\.\d+\.\d+$`, so the Deploy tab asks for a release version. Add a
+   `PACKAGE_FRAMEWORK` boolean to the configuration's build options
+   (`configSchema`) to have builds zip the install tree.
+
+### What the build leaves for a deployment
+
+The build script (`B3DCIBuild.sh`, phase `deploy-inputs`) fills `DEPLOY_DIR`
+with everything a deployment needs, taken from the tested commit:
+
+- `deploy.sh` — a copy of `Framework/Scripts/CI/B3DCIDeploy.sh`
+- `tools/B3DUploadBinaries.sh` — the uploader `deploy.sh` runs
+- `build-info.txt` — platform, architecture, build type, root commit
+- `dependencies/*.tar.gz` — every dependency the configure step built from
+  source (folders carrying a `.builtfromsource` stamp)
+- `framework/B3DFramework-<platform>-<arch>-<buildType>.zip` — the install
+  tree, only when the build option `PACKAGE_FRAMEWORK` is on
+
+The agent records every file with its size and SHA-256 when the build
+finishes; the orchestrator stores nothing else about them.
+
+### Credentials file
+
+`deploy.sh` and the promotion need secrets that never leave the server. Put
+them in a `key=value` file on the server's disk and enter its absolute path
+under **Settings → Deployment** (or set `DEPLOY_CREDENTIALS_FILE`); the
+setting applies without a restart. The server itself reads only `GIT_TOKEN`
+and `GIT_USER`; the rest is passed to `deploy.sh` untouched as
+`DEPLOY_CREDENTIALS_FILE`.
+
+```
+# Read by the server: Git push credentials for promotion and pin updates (HTTPS remotes)
+GIT_TOKEN=ghp_...
+GIT_USER=x-access-token         # optional, defaults to x-access-token
+
+# Read by deploy.sh / B3DUploadBinaries.sh: package server
+B3D_UPLOAD_BACKEND=rclone       # or ftp
+B3D_FTP_URL=ftp://packages.example.com/banshee
+B3D_FTP_USER=uploader
+B3D_FTP_PASS=...
+# or
+B3D_R2_ACCOUNT_ID=...
+B3D_R2_ACCESS_KEY_ID=...
+B3D_R2_SECRET_ACCESS_KEY=...
+B3D_R2_BUCKET=banshee-packages
+B3D_R2_PATH=dependencies        # optional prefix inside the bucket
+```
+
+Restrict the file to the account the orchestrator runs as. SSH remotes need
+no token; the orchestrator's account must hold a deploy key with write access.
+
+### What a deployment does
+
+1. **Transfer** — the agent that ran the build streams every recorded deploy
+   file to the orchestrator (`X-Content-Sha256`, exact `Content-Length`); the
+   orchestrator verifies each against the hash recorded at the end of the
+   build. The agent must be online; the deployment waits for it otherwise.
+2. **Run** — the orchestrator runs the transferred `deploy.sh` with
+   `DEPLOY_DIR`, `DEPLOY_OUTPUT_DIR`, `RESULTS_FILE`,
+   `DEPLOY_CREDENTIALS_FILE`, the build's identity (`BUILD_ID`, `PLATFORM`,
+   `GIT_COMMIT`, `GIT_BRANCH`, `TARGET_BRANCH`, ...), the build options and
+   the deploy parameters as uppercased environment variables. Files left in
+   `DEPLOY_OUTPUT_DIR` become downloadable artifacts; lines of
+   `item<TAB>status<TAB>message` in `RESULTS_FILE` are shown as a table. For
+   Banshee that means: upload each packaged dependency with `--if-missing`
+   (never overwriting, never bumping a version) and, given
+   `FRAMEWORK_VERSION`, rename the framework archive to
+   `B3DFramework-vX.Y.Z-<platform>-<arch>-<buildType>.zip` and keep it.
+3. **Promote** (only with a target branch that differs from the build branch)
+   — children first, pushes each repository's tested commit to the target:
+   fast-forward when the target did not move, a merge commit (`--no-ff`) when
+   it did, plain `push --atomic`, never forced. A conflict fails the
+   deployment and moves nothing. No pin commits are written and the build
+   branch is never touched. The promotion is journaled per root commit and
+   target branch, so the other platforms of the same build group reuse it,
+   while the same commit can still be promoted to a second branch.
+
+The received deploy files are deleted once the script ran; a retry transfers
+them again. Multiple platforms of one build group may be deployed
+independently; the "Auto deploy on success" option in Trigger Build deploys
+them all once every build of the group passed, and skips the group if any
+failed.
+
+### Recovery
+
+- **Agent offline** — the deployment waits (`pending`) for the agent by name
+  and continues when it reconnects; cancel it from the build's Deploy tab.
+- **Deploy files purged** — an agent purge deletes them; the build shows as
+  not deployable and needs a new build.
+- **Failed mid-promotion** — the journal under `deployments/<slug>/promotions/`
+  records how far the push got; **Retry** resumes from a consistent preflight
+  (repositories already on the target are recognised and not pushed again).
+- **Target moved during the promotion** — the plain push is rejected, the
+  deployment fails, and **Retry** preflights against the new tip (a merge
+  commit if needed).
+
+## 8. Audit log
 
 Mutating operations (create/update/delete projects and configurations, edit
 build/test/fetch scripts, trigger/cancel builds, change references, edit server
@@ -468,7 +636,7 @@ timestamp, actor (`user:<username>` or `agent:<name>`), action, and target.
 The log grows forever. Rotate it manually (e.g. with `logrotate` on Linux) or
 via a periodic script if it gets large.
 
-## 8. Operational checklist
+## 9. Operational checklist
 
 Before opening the firewall:
 
@@ -479,8 +647,11 @@ Before opening the firewall:
 - [ ] `curl https://forge.example.com/api/health` returns `{"status":"ok",...}`
 - [ ] `curl https://forge.example.com/api/v1/projects` returns 401 (auth required)
 - [ ] Sign-in via the web UI works, then sign out works
+- [ ] `Settings → Deployment` shows "File found on the server" for the credentials file
+- [ ] `B3DSetupStaging.sh --dry-run` reports no missing build (staging) branches
+- [ ] `git --version` on the server is 2.38 or newer (`merge-tree --write-tree` is used for merge promotions)
 
-## 9. Things this deployment does NOT do
+## 10. Things this deployment does NOT do
 
 - No automatic password reset flow — use `bsf-cli user passwd <name>` to reset.
 - No 2FA / MFA — out of scope for this initial version.

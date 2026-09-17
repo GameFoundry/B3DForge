@@ -7,8 +7,10 @@ import type {
 	AgentPhaseEvent,
 	AgentCompleteEvent,
 	AgentErrorEvent,
+	AgentFilesSentEvent,
 	BuildAssignment,
 	BuildCancelEvent,
+	DeployFilesRequest,
 } from '@banshee-forge/shared';
 
 export interface OrchestratorClientEvents {
@@ -18,6 +20,7 @@ export interface OrchestratorClientEvents {
 	'agent:register-ack': (response: { ok: boolean; agentId?: string; error?: string }) => void;
 	'build:assign': (payload: BuildAssignment) => void;
 	'build:cancel': (payload: BuildCancelEvent) => void;
+	'deploy:send-files': (payload: DeployFilesRequest) => void;
 }
 
 /**
@@ -71,16 +74,20 @@ export class OrchestratorClient {
 		this.socket.emit('agent:error', event);
 	}
 
+	sendFilesSent(event: AgentFilesSentEvent): void {
+		this.socket.emit('agent:files-sent', event);
+	}
+
 	/**
 	 * Register a handler for an orchestrator-initiated `maintenance:*` request. The handler's
 	 * resolved value is returned to the orchestrator as the Socket.IO acknowledgement; a rejection
 	 * is reported in-band so the caller sees the reason instead of a timeout.
 	 */
-	onMaintenanceRequest<T>(event: string, handler: () => Promise<T>): void {
-		this.socket.on(event, (_payload: unknown, ack?: (response: AgentAck<T>) => void) => {
+	onMaintenanceRequest<T, P = unknown>(event: string, handler: (payload: P) => Promise<T>): void {
+		this.socket.on(event, (payload: P, ack?: (response: AgentAck<T>) => void) => {
 			// An orchestrator that emitted without an acknowledgement callback has nothing to
 			// receive the result, but the work itself is still worth doing.
-			handler().then(
+			handler(payload ?? ({} as P)).then(
 				data => ack?.({ ok: true, data }),
 				(err: unknown) => {
 					const message = err instanceof Error ? err.message : String(err);

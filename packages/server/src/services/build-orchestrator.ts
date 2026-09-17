@@ -25,6 +25,9 @@ interface DispatcherDelegate {
 	cancel(buildId: string): boolean;
 }
 
+/** Invoked once a build's final state, including ingested test results, is persisted. */
+export type BuildFinishedListener = (build: Build) => Promise<void>;
+
 export interface OrchestratorConfig {
 	dataPath: string;
 }
@@ -41,6 +44,7 @@ export class BuildOrchestrator {
 	private liveState: Map<string, BuildLiveState> = new Map();
 	private dataPath: string;
 	private dispatcher: DispatcherDelegate | null = null;
+	private buildFinishedListeners: BuildFinishedListener[] = [];
 
 	constructor(
 		private io: SocketServer,
@@ -61,6 +65,11 @@ export class BuildOrchestrator {
 	/** Wired after construction to break the orchestrator ↔ dispatcher circular dependency. */
 	setDispatcher(dispatcher: DispatcherDelegate): void {
 		this.dispatcher = dispatcher;
+	}
+
+	/** Subscribe to finished builds. Listeners run after the final build record is written. */
+	onBuildFinished(listener: BuildFinishedListener): void {
+		this.buildFinishedListeners.push(listener);
 	}
 
 	async initialize(): Promise<void> {
@@ -181,7 +190,7 @@ export class BuildOrchestrator {
 		try {
 			await Promise.allSettled(state.pendingPhasePersistence);
 
-			const finalStatus: BuildStatus = event.status === 'success' ? 'success' : 'failed';
+			let finalStatus: BuildStatus = event.status === 'success' ? 'success' : 'failed';
 
 			const build = await this.buildRepo.findById(state.projectSlug, event.buildId);
 
@@ -204,12 +213,28 @@ export class BuildOrchestrator {
 				}
 			}
 
+			// The script's exit status is not the last word: parsed failures fail the build, and a
+			// checkout whose root is not the build's commit cannot count as a build of it.
+			if (finalStatus === 'success' && testSummary && testSummary.failed > 0) {
+				finalStatus = 'failed';
+				await this.buildRepo.appendLog(state.projectSlug, event.buildId, `\n[ERROR] ${testSummary.failed} test(s) failed\n`);
+				state.errorCount++;
+			}
+			if (finalStatus === 'success' && build?.gitCommit) {
+				const drift = describeRootDrift(build.gitCommit, event.repositoryCommits);
+				if (drift) {
+					finalStatus = 'failed';
+					await this.buildRepo.appendLog(state.projectSlug, event.buildId, `\n[ERROR] ${drift}\n`);
+					state.errorCount++;
+				}
+			}
+
 			const finishedAt = new Date().toISOString();
 			const durationMs = build?.startedAt
 				? new Date(finishedAt).getTime() - new Date(build.startedAt).getTime()
 				: undefined;
 
-			await this.buildRepo.update(state.projectSlug, event.buildId, {
+			const updated = await this.buildRepo.update(state.projectSlug, event.buildId, {
 				status: finalStatus,
 				phases: state.phases,
 				warningCount: state.warningCount,
@@ -218,6 +243,9 @@ export class BuildOrchestrator {
 				finishedAt,
 				durationMs,
 				testSummary,
+				testResultsComplete: true,
+				resultsUploadComplete: event.resultsUploadComplete ?? true,
+				deploymentInputs: event.deploymentInputs,
 			});
 
 			this.io.to(`build:${event.buildId}`).emit('build:complete', {
@@ -253,15 +281,18 @@ export class BuildOrchestrator {
 					agentName: state.agentName,
 				});
 			}
+
+			if (updated) await this.notifyBuildFinished(updated);
 		} catch (err) {
 			console.error(`Error in complete handler for build ${event.buildId}:`, err);
 			try {
-				await this.buildRepo.updateStatus(state.projectSlug, event.buildId, 'failed');
+				const failed = await this.buildRepo.updateStatus(state.projectSlug, event.buildId, 'failed');
 				this.io.to(`build:${event.buildId}`).emit('build:complete', {
 					buildId: event.buildId,
 					status: 'failed',
 				});
 				this.io.emit('builds:updated');
+				if (failed) await this.notifyBuildFinished(failed);
 			} catch (updateErr) {
 				console.error(`Failed to update build status for ${event.buildId}:`, updateErr);
 			}
@@ -275,9 +306,10 @@ export class BuildOrchestrator {
 		const slug = state?.projectSlug ?? projectSlug ?? null;
 		try {
 			console.error(`Build ${event.buildId} error [${event.code}]:`, event.message);
+			let failed: Build | null = null;
 			if (slug) {
 				await this.buildRepo.appendLog(slug, event.buildId, `\n[ERROR: ${event.code}] ${event.message}\n`).catch(() => undefined);
-				await this.buildRepo.updateStatus(slug, event.buildId, 'failed').catch(() => undefined);
+				failed = await this.buildRepo.updateStatus(slug, event.buildId, 'failed').catch(() => null);
 			}
 			this.io.to(`build:${event.buildId}`).emit('build:error', {
 				buildId: event.buildId,
@@ -285,8 +317,19 @@ export class BuildOrchestrator {
 				message: event.message,
 			});
 			this.emitBuildStatus(event.buildId, 'failed');
+			if (failed) await this.notifyBuildFinished(failed);
 		} finally {
 			this.liveState.delete(event.buildId);
+		}
+	}
+
+	private async notifyBuildFinished(build: Build): Promise<void> {
+		for (const listener of this.buildFinishedListeners) {
+			try {
+				await listener(build);
+			} catch (err) {
+				console.error(`Build-finished listener failed for ${build.id}:`, err);
+			}
 		}
 	}
 
@@ -444,6 +487,7 @@ export class BuildOrchestrator {
 			testSummary: build.testSummary,
 			agentId: build.agentId,
 			agentName: build.agentName,
+			groupId: build.groupId,
 		};
 	}
 
@@ -458,6 +502,16 @@ export class BuildOrchestrator {
 		this.io.to(`build:${buildId}`).emit('build:status', { buildId, status });
 		this.io.emit('builds:updated');
 	}
+}
+
+/**
+ * The root commit pins every submodule, so a checkout whose root HEAD is the build's commit is
+ * the tree that was asked for. Returns a message when the agent reported a different root.
+ */
+function describeRootDrift(expected: string, actual: RepositoryCommitInfo[]): string | null {
+	const reported = actual.find(r => r.depth === 0 && !(r.path ?? ''));
+	if (!reported || reported.commit === expected) return null;
+	return `Checkout root is at ${reported.commit.slice(0, 7)}, the build was for ${expected.slice(0, 7)}`;
 }
 
 /** Per-build state tracked by the orchestrator while the agent is running it. */

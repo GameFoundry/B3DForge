@@ -1,4 +1,5 @@
 {
   "dataPath": "D:\\BansheeForgeData",
-  "port": 3003
+  "port": 3003,
+  "bindHost": "0.0.0.0"
 }

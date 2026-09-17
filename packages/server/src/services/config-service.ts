@@ -1,11 +1,20 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { ServerConfig, ServerConfigUpdate, ConfigSource, ConfigValidationResponse } from '@banshee-forge/shared';
+import type { DeploySettings, ServerConfig, ServerConfigUpdate, ConfigSource, ConfigValidationResponse } from '@banshee-forge/shared';
 
 const CONFIG_FILENAME = 'config.json';
 const DEFAULT_PORT = 3003;
 const DEFAULT_BIND_HOST = '127.0.0.1';
 const DEFAULT_COOKIE_SECURE = false;
+/** Normalize the deploy section of a config file or update. */
+function resolveDeploySettings(...layers: (Partial<DeploySettings> | undefined)[]): DeploySettings {
+  const merged: DeploySettings = {};
+  for (const layer of layers) {
+    if (!layer) continue;
+    if (layer.credentialsFile !== undefined) merged.credentialsFile = layer.credentialsFile.trim() || undefined;
+  }
+  return merged;
+}
 
 interface LoadedConfig {
   config: ServerConfig;
@@ -59,12 +68,17 @@ export class ConfigService {
       || envBindHost !== undefined
       || envCookieSecure !== undefined;
 
+    const envDeploy: Partial<DeploySettings> = {
+      ...(process.env.DEPLOY_CREDENTIALS_FILE !== undefined ? { credentialsFile: process.env.DEPLOY_CREDENTIALS_FILE } : {}),
+    };
+
     if (anyEnvSet) {
       this.loadedConfig = {
         dataPath: envDataPath ?? fileConfig.dataPath ?? path.join(this.appRoot, 'data'),
         port: envPort ?? fileConfig.port ?? DEFAULT_PORT,
         bindHost: envBindHost ?? fileConfig.bindHost ?? DEFAULT_BIND_HOST,
         cookieSecure: envCookieSecure ?? fileConfig.cookieSecure ?? DEFAULT_COOKIE_SECURE,
+        deploy: resolveDeploySettings(fileConfig.deploy, envDeploy),
       };
       this.configSource = 'env';
       return { config: this.loadedConfig, source: this.configSource };
@@ -76,6 +90,7 @@ export class ConfigService {
         port: fileConfig.port ?? DEFAULT_PORT,
         bindHost: fileConfig.bindHost ?? DEFAULT_BIND_HOST,
         cookieSecure: fileConfig.cookieSecure ?? DEFAULT_COOKIE_SECURE,
+        deploy: resolveDeploySettings(fileConfig.deploy, envDeploy),
       };
       this.configSource = 'file';
       return { config: this.loadedConfig, source: this.configSource };
@@ -86,6 +101,7 @@ export class ConfigService {
       port: DEFAULT_PORT,
       bindHost: DEFAULT_BIND_HOST,
       cookieSecure: DEFAULT_COOKIE_SECURE,
+      deploy: resolveDeploySettings(envDeploy),
     };
     this.configSource = 'default';
     return { config: this.loadedConfig, source: this.configSource };
@@ -123,8 +139,8 @@ export class ConfigService {
   }
 
   /**
-   * Save configuration updates to the config file
-   * Changes won't take effect until server restart
+   * Save configuration updates to the config file. Server settings take effect on restart;
+   * deploy settings are applied to the running server immediately.
    */
   async save(updates: ServerConfigUpdate): Promise<void> {
     let existingConfig: Partial<ServerConfig> = {};
@@ -135,15 +151,32 @@ export class ConfigService {
       // File doesn't exist, start fresh
     }
 
+    const deploy = resolveDeploySettings(existingConfig.deploy ?? this.loadedConfig?.deploy, updates.deploy);
     const newConfig: ServerConfig = {
       dataPath: updates.dataPath ?? existingConfig.dataPath ?? this.loadedConfig?.dataPath ?? path.join(this.appRoot, 'data'),
       port: updates.port ?? existingConfig.port ?? this.loadedConfig?.port ?? DEFAULT_PORT,
       bindHost: updates.bindHost ?? existingConfig.bindHost ?? this.loadedConfig?.bindHost ?? DEFAULT_BIND_HOST,
       cookieSecure: updates.cookieSecure ?? existingConfig.cookieSecure ?? this.loadedConfig?.cookieSecure ?? DEFAULT_COOKIE_SECURE,
+      deploy,
     };
 
     await fs.writeFile(this.configPath, JSON.stringify(newConfig, null, 2), 'utf-8');
-    this.pendingChanges = updates;
+
+    if (this.loadedConfig) this.loadedConfig.deploy = deploy;
+    const { deploy: _deploy, ...restartUpdates } = updates;
+    if (Object.keys(restartUpdates).length > 0) this.pendingChanges = { ...(this.pendingChanges ?? {}), ...restartUpdates };
+  }
+
+  /** Whether the configured credentials file is readable on this machine. */
+  async credentialsFileExists(): Promise<boolean> {
+    const file = this.loadedConfig?.deploy.credentialsFile;
+    if (!file) return false;
+    try {
+      await fs.access(file);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

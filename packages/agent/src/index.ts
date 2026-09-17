@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import type { BuildAssignment, BuildCancelEvent } from '@banshee-forge/shared';
+import type { AgentPurgeArtifactsRequest, BuildAssignment, BuildCancelEvent, DeployFilesRequest } from '@banshee-forge/shared';
 import { AgentConfig, loadConfig } from './config.js';
 import { OrchestratorClient } from './orchestrator-client.js';
 import { BuildExecutor } from './build-executor.js';
+import { FileSender } from './file-sender.js';
 import { WorkspaceCleanup } from './workspace-cleanup.js';
 import { ArtifactStore } from './artifact-store.js';
 import { uploadResults } from './results-uploader.js';
@@ -25,14 +26,15 @@ async function main(): Promise<void> {
 
 	const client = new OrchestratorClient(config.orchestratorUrl, config.token);
 	const activeExecutors = new Map<string, BuildExecutor>();
+	const activeTransfers = new Map<string, FileSender>();
 
 	// Availability gating (macOS: only while this user owns the console) and a sleep assertion
 	// while builds run. Both feed the status heartbeat the dispatcher matches against.
 	const availability = new AvailabilityMonitor();
 	const sleepInhibitor = new SleepInhibitor();
 	const sendStatus = () => {
-		// Hold the sleep assertion exactly while builds are active (including result upload).
-		if (activeExecutors.size > 0) sleepInhibitor.acquire();
+		// Hold the sleep assertion exactly while builds or deployment transfers are active.
+		if (activeExecutors.size > 0 || activeTransfers.size > 0) sleepInhibitor.acquire();
 		else sleepInhibitor.release();
 
 		if (!client.isRegistered) return;
@@ -54,15 +56,21 @@ async function main(): Promise<void> {
 		cleanup.cleanupAll().catch(err => console.error('Cleanup failed:', err));
 	}, 60 * 60 * 1000).unref();
 
-	// Artifact maintenance, driven on demand from the orchestrator UI. Running builds are excluded
-	// via a predicate over the live executor map, so a build assigned partway through a purge is
-	// still protected — a snapshot taken up front would not cover it.
+	// Artifact maintenance, driven on demand from the orchestrator UI. Running builds and builds
+	// whose files are being transferred are excluded via a predicate over the live maps, so a
+	// build assigned partway through a purge is still protected — a snapshot taken up front would
+	// not cover it. The orchestrator additionally names the builds its pending deployments still need.
 	const artifacts = new ArtifactStore(config.buildsRoot);
-	const isBuildActive = (buildId: string) => activeExecutors.has(buildId);
-	client.onMaintenanceRequest('maintenance:artifact-usage', () => artifacts.measure(isBuildActive));
-	client.onMaintenanceRequest('maintenance:purge-artifacts', async () => {
-		console.log('Purging build artifacts on orchestrator request');
-		const result = await artifacts.purge(isBuildActive);
+	const isBuildBusy = (buildId: string) => activeExecutors.has(buildId)
+		|| Array.from(activeTransfers.values()).some(sender => sender.buildId === buildId);
+	const protectedBy = (request: AgentPurgeArtifactsRequest | undefined) => {
+		const ids = new Set(request?.protectedBuildIds ?? []);
+		return (buildId: string) => isBuildBusy(buildId) || ids.has(buildId);
+	};
+	client.onMaintenanceRequest<unknown, AgentPurgeArtifactsRequest | undefined>('maintenance:artifact-usage', request => artifacts.measure(protectedBy(request)));
+	client.onMaintenanceRequest<unknown, AgentPurgeArtifactsRequest | undefined>('maintenance:purge-artifacts', async request => {
+		console.log(`Purging build artifacts on orchestrator request (${request?.protectedBuildIds?.length ?? 0} protected)`);
+		const result = await artifacts.purge(protectedBy(request));
 		const gib = (result.freedBytes / 1024 ** 3).toFixed(2);
 		console.log(`Purged ${result.deletedCount} artifact director${result.deletedCount === 1 ? 'y' : 'ies'} (${gib} GiB)`);
 		return result;
@@ -118,6 +126,37 @@ async function main(): Promise<void> {
 		}
 	});
 
+	// A deployment asks for the deploy files a build left behind; they are streamed back one by
+	// one. The orchestrator refuses uploads for a deployment it cancelled, which ends the transfer.
+	client.on('deploy:send-files', (request: DeployFilesRequest) => {
+		if (activeTransfers.has(request.deploymentId)) {
+			console.warn(`Transfer for deployment ${request.deploymentId} is already running; ignoring duplicate request`);
+			return;
+		}
+		console.log(`Sending ${request.files.length} deploy file(s) of build ${request.buildId} for deployment ${request.deploymentId}`);
+		const sender = new FileSender(request, {
+			orchestratorUrl: config.orchestratorUrl,
+			token: config.token,
+			buildsRoot: config.buildsRoot,
+		});
+		activeTransfers.set(request.deploymentId, sender);
+		sendStatus();
+		sender.run()
+			.then(result => {
+				client.sendFilesSent(result);
+				console.log(`Transfer for deployment ${request.deploymentId} ${result.status}${result.error ? `: ${result.error}` : ''}`);
+			})
+			.catch(err => {
+				const message = err instanceof Error ? err.message : String(err);
+				client.sendFilesSent({ deploymentId: request.deploymentId, status: 'failed', sent: [], error: message });
+				console.error(`Transfer for deployment ${request.deploymentId} crashed:`, err);
+			})
+			.finally(() => {
+				activeTransfers.delete(request.deploymentId);
+				sendStatus();
+			});
+	});
+
 	// Periodic heartbeat so the orchestrator notices missed updates.
 	setInterval(sendStatus, 10_000).unref();
 
@@ -125,6 +164,7 @@ async function main(): Promise<void> {
 	const shutdown = (signal: string) => {
 		console.log(`Received ${signal}, shutting down`);
 		for (const executor of activeExecutors.values()) executor.kill();
+		for (const sender of activeTransfers.values()) sender.cancel();
 		availability.stop();
 		sleepInhibitor.release();
 		client.disconnect();
@@ -168,6 +208,9 @@ async function runBuild(
 		// can parse them when handling agent:complete.
 		const resultsDir = executor.getResultsDir();
 		const finalize = async () => {
+			// A build whose result files did not all arrive cannot prove its tests passed, so the
+			// orchestrator refuses to deploy it. Skipped (oversized) files count as missing too.
+			let resultsUploadComplete = true;
 			if (resultsDir) {
 				try {
 					const summary = await uploadResults({
@@ -180,8 +223,10 @@ async function runBuild(
 					if (summary.uploaded + summary.failed + summary.skipped > 0) {
 						console.log(`[results-upload] build ${buildId}: uploaded=${summary.uploaded} failed=${summary.failed} skipped=${summary.skipped}`);
 					}
+					resultsUploadComplete = summary.failed === 0 && summary.skipped === 0;
 				} catch (err) {
 					console.warn(`[results-upload] build ${buildId} aborted:`, err);
+					resultsUploadComplete = false;
 				}
 			}
 
@@ -191,6 +236,8 @@ async function runBuild(
 				exitCode,
 				repositoryCommits: executor.getRepositoryCommits(),
 				snapshotCategories: executor.getSnapshotCategories(),
+				resultsUploadComplete,
+				deploymentInputs: executor.getDeploymentInputs() ?? undefined,
 			});
 			activeExecutors.delete(buildId);
 			sendStatus();

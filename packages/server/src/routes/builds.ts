@@ -1,16 +1,20 @@
 import { Router } from 'express';
-import type { Build, CreateBuildInput, PaginatedResponse, BuildSummary, TriggerBuildResponse } from '@banshee-forge/shared';
+import type { CreateBuildInput, PaginatedResponse, BuildSummary, TriggerBuildResponse } from '@banshee-forge/shared';
 import { isKnownPlatform } from '@banshee-forge/shared';
 import { resolveConfigurationPlatforms } from '../services/configuration-platforms.js';
 import { BuildRepository } from '../repositories/build-repository.js';
+import { BuildGroupRepository } from '../repositories/build-group-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { BuildOrchestrator } from '../services/build-orchestrator.js';
+import { BuildTriggerService } from '../services/build-trigger-service.js';
 import { AuditLog } from '../auth/audit-log.js';
 
 export function createBuildRoutes(
   buildRepo: BuildRepository,
+  groupRepo: BuildGroupRepository,
   projectRepo: ProjectRepository,
   orchestrator: BuildOrchestrator,
+  triggerService: BuildTriggerService,
   auditLog?: AuditLog
 ): Router {
   const router = Router();
@@ -59,7 +63,7 @@ export function createBuildRoutes(
         : undefined;
 
       // Validate configuration exists if ID was provided
-      if (input.configurationId && !configuration) {
+      if (!configuration) {
         res.status(400).json({ error: 'Bad request', message: 'Configuration not found' });
         return;
       }
@@ -78,29 +82,48 @@ export function createBuildRoutes(
         return;
       }
 
-      // Use configuration's defaultConfig if available
-      const defaultConfig = configuration?.defaultConfig ?? {};
-      const configurationName = configuration?.name ?? 'default';
       const priority = (input as { priority?: number }).priority ?? 0;
 
-      const builds: Build[] = [];
-      for (const platform of platforms) {
-        const build = await buildRepo.create(req.params.slug, {
-          ...input,
-          configurationId: configurationId ?? '',
-          gitBranch: input.gitBranch || configuration?.gitBranch || project.gitBranch,
-          config: input.config ?? defaultConfig,
-        }, 'manual', configurationName, platform);
-
-        // Trigger build execution via orchestrator
-        await orchestrator.triggerBuild(req.params.slug, build.id, priority);
-
-        auditLog?.append({ actor: AuditLog.actorOf(req), action: 'build.trigger', target: `${req.params.slug}/${build.id}`, details: { configurationId: build.configurationId, configurationName, platform } });
-        builds.push(build);
+      let triggered;
+      try {
+        triggered = await triggerService.triggerGroup({
+          project,
+          configuration,
+          platforms,
+          triggerType: 'manual',
+          triggeredBy: input.triggeredBy ?? req.user?.username,
+          gitBranch: input.gitBranch,
+          gitCommit: input.gitCommit,
+          config: input.config,
+          cleanBuild: input.cleanBuild,
+          autoDeploy: input.autoDeploy,
+          priority,
+        });
+      } catch (error) {
+        // Resolving the root commit talks to the remote; a missing branch or unreachable repository is a client-visible failure.
+        res.status(400).json({ error: 'Bad request', message: `Could not resolve sources: ${(error as Error).message}` });
+        return;
       }
 
-      const response: TriggerBuildResponse = { builds };
+      for (const build of triggered.builds)
+        auditLog?.append({ actor: AuditLog.actorOf(req), action: 'build.trigger', target: `${req.params.slug}/${build.id}`, details: { configurationId: build.configurationId, configurationName: configuration.name, platform: build.platform, groupId: triggered.group.id, autoDeploy: triggered.group.autoDeploy } });
+
+      const response: TriggerBuildResponse = { builds: triggered.builds, group: triggered.group };
       res.status(201).json(response);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // GET /api/v1/projects/:slug/groups/:groupId - Build group (platforms sharing one root commit)
+  router.get('/projects/:slug/groups/:groupId', async (req, res, next) => {
+    try {
+      const group = await groupRepo.findById(req.params.slug, req.params.groupId);
+      if (!group) {
+        res.status(404).json({ error: 'Not found', message: 'Build group not found' });
+        return;
+      }
+      res.json(group);
     } catch (error) {
       next(error);
     }
