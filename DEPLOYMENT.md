@@ -558,7 +558,9 @@ with everything a deployment needs, taken from the tested commit:
 - `tools/B3DUploadBinaries.sh` — the uploader `deploy.sh` runs
 - `build-info.txt` — platform, architecture, build type, root commit
 - `dependencies/*.tar.gz` — every dependency the configure step built from
-  source (folders carrying a `.builtfromsource` stamp)
+  source (folders carrying a `.builtfromsource` stamp). The build removes the
+  stamp after archiving, so only the build that built a dependency carries its
+  archive; deploy that build to publish it
 - `framework/B3DFramework-<platform>-<arch>-<buildType>.zip` — the install
   tree, only when the build option `PACKAGE_FRAMEWORK` is on
 

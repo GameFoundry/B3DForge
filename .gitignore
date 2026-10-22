@@ -14,6 +14,9 @@ build/
 # Local agent token (written by rebuild.sh, never commit)
 .agent-token
 
+# Per-machine agent settings (platforms, labels); see DEPLOYMENT.md
+agent.json
+
 # Data storage (keep structure, ignore contents)
 data/projects/*.json
 data/projects/*/

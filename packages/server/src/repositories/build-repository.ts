@@ -13,7 +13,26 @@ export interface BuildGroupMembership {
 }
 
 export class BuildRepository {
+  /** Tail of the pending write chain per project; see withProjectLock(). */
+  private projectLocks = new Map<string, Promise<unknown>>();
+
   constructor(private storage: JsonFileStorage) {}
+
+  /**
+   * Runs work after every earlier write to the same project has finished. All builds of a project
+   * share one builds.json, so concurrent read-modify-write cycles (e.g. a group's per-platform
+   * builds finishing together) would otherwise overwrite each other's index entries.
+   */
+  private async withProjectLock<T>(projectSlug: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.projectLocks.get(projectSlug) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(work);
+    this.projectLocks.set(projectSlug, next);
+    try {
+      return await next;
+    } finally {
+      if (this.projectLocks.get(projectSlug) === next) this.projectLocks.delete(projectSlug);
+    }
+  }
 
   private buildsFilePath(projectSlug: string): string {
     return `builds/${projectSlug}/builds.json`;
@@ -48,6 +67,17 @@ export class BuildRepository {
     triggerType: TriggerType,
     configurationName = 'default',
     platform: string = DEFAULT_PLATFORM,
+    membership?: BuildGroupMembership
+  ): Promise<Build> {
+    return this.withProjectLock(projectSlug, () => this.createLocked(projectSlug, input, triggerType, configurationName, platform, membership));
+  }
+
+  private async createLocked(
+    projectSlug: string,
+    input: CreateBuildInput,
+    triggerType: TriggerType,
+    configurationName: string,
+    platform: string,
     membership?: BuildGroupMembership
   ): Promise<Build> {
     const buildsPath = this.buildsFilePath(projectSlug);
@@ -127,6 +157,10 @@ export class BuildRepository {
    * Recovery can always reconstruct index from detail files.
    */
   private async updateAtomic(projectSlug: string, buildId: string, updates: Partial<Build>): Promise<Build | null> {
+    return this.withProjectLock(projectSlug, () => this.updateLocked(projectSlug, buildId, updates));
+  }
+
+  private async updateLocked(projectSlug: string, buildId: string, updates: Partial<Build>): Promise<Build | null> {
     const buildPath = this.buildFilePath(projectSlug, buildId);
     const buildsPath = this.buildsFilePath(projectSlug);
 
