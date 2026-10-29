@@ -152,7 +152,9 @@ include `deploy.sh`) under `{buildsRoot}/{buildId}`.
      it pins (recursively). The orchestrator fails a build whose reported root differs.
 4. Phases detected via `::phase::NAME` markers in script output
 5. Warnings/errors parsed via regex (MSVC, GCC, CMake patterns)
-6. Test results parsed from JSON files after completion
+6. Test results parsed from JSON files after completion. Snapshots with a reference image for the
+   build's configuration and platform are compared against it; one differing in more than 50% of
+   pixels (`SNAPSHOT_DIFF_FAIL_PERCENT`) is failed, and any failed test fails the build
 7. Real-time updates broadcast via Socket.IO
 
 ## API Endpoints

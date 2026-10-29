@@ -202,6 +202,7 @@ export class BuildOrchestrator {
 					);
 					const testResults = await this.testResultsService.parseAndStoreResults(
 						state.projectSlug, event.buildId, resultsDir, event.snapshotCategories,
+						{ configurationId: build?.configurationId || 'default', platform: build?.platform ?? DEFAULT_PLATFORM },
 					);
 					testSummary = this.testResultsService.computeTestSummary(testResults);
 					this.io.to(`build:${event.buildId}`).emit('test_results', {

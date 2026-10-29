@@ -10,6 +10,25 @@ import type {
 } from '@banshee-forge/shared';
 import { DEFAULT_SNAPSHOT_CATEGORY } from '@banshee-forge/shared';
 import { TestResultsRepository } from '../repositories/test-results-repository.js';
+import { ReferenceRepository } from '../repositories/reference-repository.js';
+import { ImageComparisonService } from './image-comparison-service.js';
+import { computeSnapshotDiffPercentage } from './snapshot-diff.js';
+
+/**
+ * A snapshot whose screenshot differs from its reference image in more than this percentage of
+ * pixels fails, whatever the test itself reported. Kept high while the tests are not yet
+ * deterministic.
+ */
+const SNAPSHOT_DIFF_FAIL_PERCENT = 50;
+
+/** Value of `SnapshotTestStatus::Failed` in the engine's result JSON. */
+const SNAPSHOT_STATUS_FAILED = 1;
+
+/** Reference images a build's snapshots are compared against. */
+export interface SnapshotReferenceScope {
+	configurationId: string;
+	platform: string;
+}
 
 /**
  * Service for parsing, aggregating, and managing test results.
@@ -19,7 +38,11 @@ import { TestResultsRepository } from '../repositories/test-results-repository.j
  * 2. Snapshot tests: JSON per example with `type: "snapshot_test"`, plus screenshots and logs
  */
 export class TestResultsService {
-	constructor(private repository: TestResultsRepository) {}
+	constructor(
+		private repository: TestResultsRepository,
+		private referenceRepository: ReferenceRepository,
+		private imageComparison: ImageComparisonService,
+	) {}
 
 	/**
 	 * Parse test output files from the results directory and store aggregated results.
@@ -43,13 +66,18 @@ export class TestResultsService {
 	 * to DEFAULT_SNAPSHOT_CATEGORY (a snapshots/categories.json manifest, if present, is
 	 * honored as a defensive fallback before falling back to flat).
 	 *
+	 * Snapshots with a reference image for `referenceScope` are compared against it, and one that
+	 * differs by more than SNAPSHOT_DIFF_FAIL_PERCENT is failed.
+	 *
 	 * @param	declaredCategories	Ordered snapshot categories from the agent's marker parsing.
+	 * @param	referenceScope		Configuration and platform whose reference images apply.
 	 */
 	async parseAndStoreResults(
 		projectSlug: string,
 		buildId: string,
 		resultsDir: string,
-		declaredCategories?: string[]
+		declaredCategories: string[] | undefined,
+		referenceScope: SnapshotReferenceScope,
 	): Promise<BuildTestResults> {
 		const results: BuildTestResults = { buildId };
 
@@ -76,6 +104,8 @@ export class TestResultsService {
 			resultsDir, projectSlug, buildId, declaredCategories
 		);
 		if (snapshotResults.length > 0) {
+			await this.failSnapshotsDifferingFromReference(projectSlug, buildId, referenceScope, snapshotResults);
+
 			const passed = snapshotResults.filter(r => r.statusText === 'passed').length;
 			const failed = snapshotResults.filter(r =>
 				r.statusText === 'failed' || r.statusText === 'crashed'
@@ -107,6 +137,45 @@ export class TestResultsService {
 		await this.repository.saveResults(projectSlug, buildId, results);
 
 		return results;
+	}
+
+	/**
+	 * Compare every snapshot that has a reference image with it, record the difference, and fail
+	 * the ones that differ by more than SNAPSHOT_DIFF_FAIL_PERCENT. Expects the screenshots to have
+	 * been copied into storage already.
+	 */
+	private async failSnapshotsDifferingFromReference(
+		projectSlug: string,
+		buildId: string,
+		referenceScope: SnapshotReferenceScope,
+		snapshots: AggregatedSnapshotResult[],
+	): Promise<void> {
+		const manifest = await this.referenceRepository.getManifest(projectSlug, referenceScope.configurationId, referenceScope.platform);
+		const diffContext = {
+			testResultsRepo: this.repository,
+			referenceRepo: this.referenceRepository,
+			imageComparison: this.imageComparison,
+			projectSlug,
+			buildId,
+			...referenceScope,
+		};
+
+		for (const snapshot of snapshots) {
+			if (!manifest.references[`${snapshot.category}/${snapshot.testName}`])
+				continue;
+
+			const diffPercentage = await computeSnapshotDiffPercentage(diffContext, snapshot);
+			if (diffPercentage === undefined)
+				continue;
+
+			snapshot.diffPercentage = diffPercentage;
+			if (diffPercentage <= SNAPSHOT_DIFF_FAIL_PERCENT)
+				continue;
+
+			snapshot.status = SNAPSHOT_STATUS_FAILED;
+			snapshot.statusText = 'failed';
+			snapshot.errors.push(`Screenshot differs from the reference image in ${diffPercentage.toFixed(2)}% of pixels (fails above ${SNAPSHOT_DIFF_FAIL_PERCENT}%)`);
+		}
 	}
 
 	/**

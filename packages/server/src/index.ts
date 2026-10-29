@@ -102,8 +102,8 @@ if (userCount === 0) {
 }
 
 // Initialize services
-const testResultsService = new TestResultsService(testResultsRepo);
 const imageComparisonService = new ImageComparisonService();
+const testResultsService = new TestResultsService(testResultsRepo, referenceRepo, imageComparisonService);
 
 // Create Express app
 const app = express();
