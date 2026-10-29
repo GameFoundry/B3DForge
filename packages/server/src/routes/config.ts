@@ -17,6 +17,7 @@ export function createConfigRoutes(configService: ConfigService, auditLog?: Audi
         bindHost: config.bindHost,
         cookieSecure: config.cookieSecure,
         deploy: config.deploy,
+        mcp: config.mcp,
         credentialsFileExists: await configService.credentialsFileExists(),
         configSource: configService.getSource(),
         pendingRestart: configService.hasPendingChanges(),
@@ -53,14 +54,14 @@ export function createConfigRoutes(configService: ConfigService, auditLog?: Audi
       await configService.save(updates);
 
       // The credentials file's contents never enter the log; only that the setting changed.
-      const { deploy, ...rest } = updates;
-      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'config.update', details: { ...rest, ...(deploy ? { deploy: { credentialsFile: deploy.credentialsFile } } : {}) } });
+      const { deploy, mcp, ...rest } = updates;
+      auditLog?.append({ actor: AuditLog.actorOf(req), action: 'config.update', details: { ...rest, ...(deploy ? { deploy: { credentialsFile: deploy.credentialsFile } } : {}), ...(mcp ? { mcp } : {}) } });
 
       const requiresRestart = Object.keys(rest).length > 0;
       const response: ConfigUpdateResponse = {
         success: true,
         requiresRestart,
-        message: requiresRestart ? 'Configuration saved. Restart the server to apply changes.' : 'Deployment settings saved.',
+        message: requiresRestart ? 'Configuration saved. Restart the server to apply changes.' : 'Settings saved.',
       };
       res.json(response);
     } catch (err) {

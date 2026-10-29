@@ -164,6 +164,7 @@ repository root, then defaults. Defaults are:
 | `port`         | `3003`        | TCP port the HTTP server listens on                             |
 | `bindHost`     | `127.0.0.1`   | Network interface to bind. Keep at `127.0.0.1` behind a proxy   |
 | `cookieSecure` | `false`       | Set to `true` once you're behind HTTPS (Caddy)                  |
+| `mcp.enabled`  | `true`        | Serve the MCP endpoint at `/mcp` (Settings → MCP, no restart)   |
 
 The corresponding env vars are `DATA_PATH`, `PORT`, `BIND_HOST`, `COOKIE_SECURE`.
 
@@ -275,6 +276,17 @@ You can also do all three from the web UI under Settings → Agent Tokens.
 Revoking a token immediately invalidates it; the next request with that token
 gets a 401, and any open agent socket using it is dropped on the next
 authenticated operation.
+
+### MCP tokens
+
+Coding agents (Claude Code and other MCP clients) use the MCP endpoint at
+`/mcp` with a separate kind of bearer token (`bsf_mcp_...`), so an MCP client
+can never pose as a build agent and vice versa. Create one under Settings → MCP,
+which also switches the endpoint on or off and shows the connect command:
+
+```bash
+claude mcp add --transport http --scope user banshee-forge http://<server>:3003/mcp --header "Authorization: Bearer bsf_mcp_..."
+```
 
 ## <a id="remote-agent"></a>6. Remote build agents
 

@@ -27,7 +27,7 @@ import { KnownAgentsRepository } from './repositories/known-agents-repository.js
 import { createPlatformRoutes } from './routes/platforms.js';
 import { UsersRepository } from './auth/users-repository.js';
 import { SessionsRepository } from './auth/sessions-repository.js';
-import { AgentTokensRepository } from './auth/agent-tokens-repository.js';
+import { AgentTokensRepository, MCP_TOKEN_KIND } from './auth/agent-tokens-repository.js';
 import { createAuthMiddlewares, parseCookieHeader, resolveSessionUser, SESSION_COOKIE_NAME } from './auth/middleware.js';
 import { createAuthRoutes } from './auth/routes.js';
 import { createAgentRoutes } from './routes/agents.js';
@@ -44,6 +44,7 @@ import { ScriptResolver } from './services/script-resolver.js';
 import { PromotionService } from './services/promotion-service.js';
 import { DeploymentService } from './services/deployment-service.js';
 import { createDeploymentRoutes } from './routes/deployments.js';
+import { createMcpRoutes } from './mcp/mcp-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -82,6 +83,7 @@ const deploymentRepo = new DeploymentRepository(storage);
 const usersRepo = new UsersRepository(storage);
 const sessionsRepo = new SessionsRepository(storage);
 const agentTokensRepo = new AgentTokensRepository(storage);
+const mcpTokensRepo = new AgentTokensRepository(storage, MCP_TOKEN_KIND);
 const auditLog = new AuditLog(DATA_PATH);
 const { requireUser, requireAgent } = createAuthMiddlewares(usersRepo, sessionsRepo, agentTokensRepo);
 
@@ -176,6 +178,24 @@ app.use('/api/v1/agent', createAgentDataRoutes({
   deploymentService,
 }, requireAgent));
 
+// MCP endpoint for coding agents; authenticates with MCP tokens and can be switched off in the settings.
+app.use('/mcp', createMcpRoutes({
+  configService,
+  mcpTokensRepo,
+  projectRepo,
+  buildRepo,
+  groupRepo,
+  testResultsRepo,
+  testResultsService,
+  referenceRepo,
+  imageComparison: imageComparisonService,
+  knownAgentsRepo,
+  agentRegistry,
+  orchestrator,
+  triggerService,
+  auditLog,
+}));
+
 // All API endpoints below this line require an authenticated user
 app.use('/api/v1', requireUser);
 
@@ -185,6 +205,7 @@ app.use('/api/v1', createDeploymentRoutes(deploymentRepo, buildRepo, projectRepo
 app.use('/api/v1', createAgentRoutes(agentRegistry, deploymentService, auditLog));
 app.use('/api/v1', createPlatformRoutes(agentRegistry, knownAgentsRepo, auditLog));
 app.use('/api/v1/agent-tokens', createAgentTokenRoutes(agentTokensRepo, auditLog));
+app.use('/api/v1/mcp-tokens', createAgentTokenRoutes(mcpTokensRepo, auditLog, 'mcp-token'));
 app.use('/api/v1/config', createConfigRoutes(configService, auditLog));
 app.use('/api/v1', createTestRoutes(
 	testResultsService,
@@ -290,6 +311,7 @@ async function start() {
     const localUrl = `http://${BIND_HOST === '0.0.0.0' ? 'localhost' : BIND_HOST}:${PORT}`;
     console.log(`BansheeForge server listening on ${BIND_HOST}:${PORT}`);
     console.log(`  - API: ${localUrl}/api/v1`);
+    console.log(`  - MCP: ${localUrl}/mcp${config.mcp.enabled ? '' : ' (disabled)'}`);
     console.log(`  - UI:  ${webClientExists ? localUrl : 'Not built (run: pnpm run build from packages/web)'}`);
     console.log(`Data directory: ${DATA_PATH}`);
     if (configService.hasPendingChanges()) {

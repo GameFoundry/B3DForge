@@ -12,6 +12,12 @@ export interface DeploySettings {
 	credentialsFile?: string;
 }
 
+/** MCP endpoint settings. */
+export interface McpSettings {
+	/** Serve the MCP endpoint at `/mcp`. Defaults to true. */
+	enabled: boolean;
+}
+
 /**
  * Server configuration
  */
@@ -31,6 +37,8 @@ export interface ServerConfig {
   cookieSecure: boolean;
   /** Applied immediately when saved; no restart needed. */
   deploy: DeploySettings;
+  /** Applied immediately when saved; no restart needed. */
+  mcp: McpSettings;
 }
 
 /**
@@ -42,6 +50,7 @@ export interface ServerConfigUpdate {
   bindHost?: string;
   cookieSecure?: boolean;
   deploy?: Partial<DeploySettings>;
+  mcp?: Partial<McpSettings>;
 }
 
 /**
@@ -58,6 +67,7 @@ export interface ConfigResponse {
   bindHost: string;
   cookieSecure: boolean;
   deploy: DeploySettings;
+  mcp: McpSettings;
   /** Whether the credentials file currently exists on the orchestrator's disk. */
   credentialsFileExists: boolean;
   configSource: ConfigSource;

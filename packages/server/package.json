@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@banshee-forge/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -28,7 +29,8 @@
     "pngjs": "^7.0.0",
     "prompts": "^2.4.2",
     "socket.io": "^4.7.2",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -268,21 +268,28 @@ export const platformsApi = {
     fetchJson<{ success: boolean }>(`${API_BASE}/known-agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };
 
-// Agent token API
+// Bearer token APIs (build agents and MCP clients)
 export interface CreatedAgentTokenResponse extends AgentTokenPublic {
   plaintext: string;
 }
 
-export const agentTokensApi = {
-  list: () => fetchJson<{ tokens: AgentTokenPublic[] }>(`${API_BASE}/agent-tokens`),
-  create: (name: string) =>
-    fetchJson<CreatedAgentTokenResponse>(`${API_BASE}/agent-tokens`, {
-      method: 'POST', body: JSON.stringify({ name }),
-    }),
-  revoke: (id: string) =>
-    fetch(`${API_BASE}/agent-tokens/${id}`, { method: 'DELETE', credentials: 'include' })
-      .then(res => { if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`); }),
-};
+function createTokensApi(resource: string) {
+  return {
+    list: () => fetchJson<{ tokens: AgentTokenPublic[] }>(`${API_BASE}/${resource}`),
+    create: (name: string) =>
+      fetchJson<CreatedAgentTokenResponse>(`${API_BASE}/${resource}`, {
+        method: 'POST', body: JSON.stringify({ name }),
+      }),
+    revoke: (id: string) =>
+      fetch(`${API_BASE}/${resource}/${id}`, { method: 'DELETE', credentials: 'include' })
+        .then(res => { if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`); }),
+  };
+}
+
+export type TokensApi = ReturnType<typeof createTokensApi>;
+
+export const agentTokensApi = createTokensApi('agent-tokens');
+export const mcpTokensApi = createTokensApi('mcp-tokens');
 
 // References API (scoped per configuration and target platform)
 export const referencesApi = {

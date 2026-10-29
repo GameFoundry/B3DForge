@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { AgentTokensRepository } from '../auth/agent-tokens-repository.js';
 import { AuditLog } from '../auth/audit-log.js';
 
-export function createAgentTokenRoutes(repo: AgentTokensRepository, auditLog?: AuditLog): Router {
+/** CRUD for one kind of bearer token. `auditPrefix` names the kind in audit entries (`agent-token`, `mcp-token`). */
+export function createAgentTokenRoutes(repo: AgentTokensRepository, auditLog?: AuditLog, auditPrefix = 'agent-token'): Router {
 	const router = Router();
 
 	router.get('/', async (_req, res, next) => {
@@ -23,7 +24,7 @@ export function createAgentTokenRoutes(repo: AgentTokensRepository, auditLog?: A
 			const created = await repo.create(name);
 			auditLog?.append({
 				actor: AuditLog.actorOf(req),
-				action: 'agent-token.create',
+				action: `${auditPrefix}.create`,
 				target: created.record.id,
 				details: { name },
 			});
@@ -42,7 +43,7 @@ export function createAgentTokenRoutes(repo: AgentTokensRepository, auditLog?: A
 			}
 			auditLog?.append({
 				actor: AuditLog.actorOf(req),
-				action: 'agent-token.revoke',
+				action: `${auditPrefix}.revoke`,
 				target: req.params.id,
 			});
 			res.status(204).end();

@@ -7,6 +7,7 @@ import { TestResultsRepository } from '../repositories/test-results-repository.j
 import { ReferenceRepository } from '../repositories/reference-repository.js';
 import { ProjectRepository } from '../repositories/project-repository.js';
 import { BuildRepository } from '../repositories/build-repository.js';
+import { computeSnapshotDiffPercentage, type SnapshotDiffContext } from '../services/snapshot-diff.js';
 
 export function createTestRoutes(
 	testResultsService: TestResultsService,
@@ -64,38 +65,18 @@ export function createTestRoutes(
 					const configurationId = build.configurationId || 'default';
 					const platform = build.platform ?? DEFAULT_PLATFORM;
 					const manifest = await referenceRepository.getManifest(projectSlug, configurationId, platform);
+					const diffContext: SnapshotDiffContext = {
+						testResultsRepo: testResultsRepository,
+						referenceRepo: referenceRepository,
+						imageComparison: imageComparisonService,
+						projectSlug, buildId, configurationId, platform,
+					};
 
 					await Promise.all(snapshotTests.results.map(async (snapshot) => {
-						if (snapshot.statusText === 'crashed' || !snapshot.screenshotPath)
+						if (!manifest.references[`${snapshot.category}/${snapshot.testName}`])
 							return;
 
-						const category = snapshot.category!;
-						if (!manifest.references[`${category}/${snapshot.testName}`])
-							return;
-
-						try {
-							const screenshotPath = await testResultsRepository.resolveSnapshotFilePath(
-								projectSlug, buildId, category, snapshot.testName, 'screenshot.png'
-							);
-							if (!screenshotPath) return;
-
-							const referencePath = referenceRepository.getReferenceImagePath(
-								projectSlug, configurationId, platform, category, snapshot.testName
-							);
-
-							const [screenshotStat, referenceStat] = await Promise.all([
-								fs.stat(screenshotPath).catch(() => null),
-								fs.stat(referencePath).catch(() => null),
-							]);
-							if (!screenshotStat || screenshotStat.size === 0 || !referenceStat || referenceStat.size === 0)
-								return;
-
-							snapshot.diffPercentage = await imageComparisonService.getDiffPercentage(
-								screenshotPath, referencePath
-							);
-						} catch {
-							// Comparison failed, leave diffPercentage undefined
-						}
+						snapshot.diffPercentage = await computeSnapshotDiffPercentage(diffContext, snapshot);
 					}));
 				}
 			}

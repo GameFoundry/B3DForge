@@ -1,28 +1,49 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { agentTokensApi } from '../api/client';
+import { agentTokensApi, type TokensApi } from '../api/client';
 
 export function AgentTokens() {
+	return (
+		<div className="bg-gray-800 rounded-lg p-6">
+			<h2 className="text-lg font-medium text-gray-100 mb-1">Agent Tokens</h2>
+			<p className="text-gray-400 text-sm mb-4">
+				Bearer tokens used by remote build agents to authenticate with the orchestrator.
+			</p>
+			<TokenManager api={agentTokensApi} queryKey="agent-tokens" placeholder="Token name (e.g. linux-build-vm)" noun="agent tokens" />
+		</div>
+	);
+}
+
+interface TokenManagerProps {
+	api: TokensApi;
+	queryKey: string;
+	placeholder: string;
+	/** Plural name shown when there are no tokens ("agent tokens"). */
+	noun: string;
+}
+
+/** Create, list and revoke one kind of bearer token. */
+export function TokenManager({ api, queryKey, placeholder, noun }: TokenManagerProps) {
 	const queryClient = useQueryClient();
 	const { data, isLoading } = useQuery({
-		queryKey: ['agent-tokens'],
-		queryFn: () => agentTokensApi.list(),
+		queryKey: [queryKey],
+		queryFn: () => api.list(),
 	});
 	const [newName, setNewName] = useState('');
 	const [createdSecret, setCreatedSecret] = useState<{ name: string; plaintext: string } | null>(null);
 
 	const createMutation = useMutation({
-		mutationFn: (name: string) => agentTokensApi.create(name),
+		mutationFn: (name: string) => api.create(name),
 		onSuccess: (created) => {
 			setCreatedSecret({ name: created.name, plaintext: created.plaintext });
 			setNewName('');
-			queryClient.invalidateQueries({ queryKey: ['agent-tokens'] });
+			queryClient.invalidateQueries({ queryKey: [queryKey] });
 		},
 	});
 
 	const revokeMutation = useMutation({
-		mutationFn: (id: string) => agentTokensApi.revoke(id),
-		onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agent-tokens'] }),
+		mutationFn: (id: string) => api.revoke(id),
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: [queryKey] }),
 	});
 
 	const handleCreate = () => {
@@ -32,18 +53,13 @@ export function AgentTokens() {
 	};
 
 	return (
-		<div className="bg-gray-800 rounded-lg p-6">
-			<h2 className="text-lg font-medium text-gray-100 mb-1">Agent Tokens</h2>
-			<p className="text-gray-400 text-sm mb-4">
-				Bearer tokens used by remote build agents to authenticate with the orchestrator.
-			</p>
-
+		<div>
 			<div className="flex gap-2 mb-4">
 				<input
 					type="text"
 					value={newName}
 					onChange={(e) => setNewName(e.target.value)}
-					placeholder="Token name (e.g. linux-build-vm)"
+					placeholder={placeholder}
 					className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-gray-100 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
 				/>
 				<button
@@ -75,7 +91,7 @@ export function AgentTokens() {
 			{isLoading ? (
 				<div className="text-gray-400 text-sm">Loading...</div>
 			) : (data?.tokens ?? []).length === 0 ? (
-				<p className="text-gray-500 text-sm">No agent tokens yet.</p>
+				<p className="text-gray-500 text-sm">No {noun} yet.</p>
 			) : (
 				<table className="w-full text-sm">
 					<thead className="text-left text-xs uppercase tracking-wider text-gray-400">

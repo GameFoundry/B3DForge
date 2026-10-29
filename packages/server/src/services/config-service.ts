@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { DeploySettings, ServerConfig, ServerConfigUpdate, ConfigSource, ConfigValidationResponse } from '@banshee-forge/shared';
+import type { DeploySettings, McpSettings, ServerConfig, ServerConfigUpdate, ConfigSource, ConfigValidationResponse } from '@banshee-forge/shared';
 
 const CONFIG_FILENAME = 'config.json';
 const DEFAULT_PORT = 3003;
@@ -12,6 +12,15 @@ function resolveDeploySettings(...layers: (Partial<DeploySettings> | undefined)[
   for (const layer of layers) {
     if (!layer) continue;
     if (layer.credentialsFile !== undefined) merged.credentialsFile = layer.credentialsFile.trim() || undefined;
+  }
+  return merged;
+}
+
+/** Normalize the mcp section of a config file or update. The endpoint is enabled unless a layer turns it off. */
+function resolveMcpSettings(...layers: (Partial<McpSettings> | undefined)[]): McpSettings {
+  const merged: McpSettings = { enabled: true };
+  for (const layer of layers) {
+    if (layer?.enabled !== undefined) merged.enabled = !!layer.enabled;
   }
   return merged;
 }
@@ -79,6 +88,7 @@ export class ConfigService {
         bindHost: envBindHost ?? fileConfig.bindHost ?? DEFAULT_BIND_HOST,
         cookieSecure: envCookieSecure ?? fileConfig.cookieSecure ?? DEFAULT_COOKIE_SECURE,
         deploy: resolveDeploySettings(fileConfig.deploy, envDeploy),
+        mcp: resolveMcpSettings(fileConfig.mcp),
       };
       this.configSource = 'env';
       return { config: this.loadedConfig, source: this.configSource };
@@ -91,6 +101,7 @@ export class ConfigService {
         bindHost: fileConfig.bindHost ?? DEFAULT_BIND_HOST,
         cookieSecure: fileConfig.cookieSecure ?? DEFAULT_COOKIE_SECURE,
         deploy: resolveDeploySettings(fileConfig.deploy, envDeploy),
+        mcp: resolveMcpSettings(fileConfig.mcp),
       };
       this.configSource = 'file';
       return { config: this.loadedConfig, source: this.configSource };
@@ -102,6 +113,7 @@ export class ConfigService {
       bindHost: DEFAULT_BIND_HOST,
       cookieSecure: DEFAULT_COOKIE_SECURE,
       deploy: resolveDeploySettings(envDeploy),
+      mcp: resolveMcpSettings(),
     };
     this.configSource = 'default';
     return { config: this.loadedConfig, source: this.configSource };
@@ -140,7 +152,7 @@ export class ConfigService {
 
   /**
    * Save configuration updates to the config file. Server settings take effect on restart;
-   * deploy settings are applied to the running server immediately.
+   * deploy and mcp settings are applied to the running server immediately.
    */
   async save(updates: ServerConfigUpdate): Promise<void> {
     let existingConfig: Partial<ServerConfig> = {};
@@ -152,18 +164,23 @@ export class ConfigService {
     }
 
     const deploy = resolveDeploySettings(existingConfig.deploy ?? this.loadedConfig?.deploy, updates.deploy);
+    const mcp = resolveMcpSettings(existingConfig.mcp ?? this.loadedConfig?.mcp, updates.mcp);
     const newConfig: ServerConfig = {
       dataPath: updates.dataPath ?? existingConfig.dataPath ?? this.loadedConfig?.dataPath ?? path.join(this.appRoot, 'data'),
       port: updates.port ?? existingConfig.port ?? this.loadedConfig?.port ?? DEFAULT_PORT,
       bindHost: updates.bindHost ?? existingConfig.bindHost ?? this.loadedConfig?.bindHost ?? DEFAULT_BIND_HOST,
       cookieSecure: updates.cookieSecure ?? existingConfig.cookieSecure ?? this.loadedConfig?.cookieSecure ?? DEFAULT_COOKIE_SECURE,
       deploy,
+      mcp,
     };
 
     await fs.writeFile(this.configPath, JSON.stringify(newConfig, null, 2), 'utf-8');
 
-    if (this.loadedConfig) this.loadedConfig.deploy = deploy;
-    const { deploy: _deploy, ...restartUpdates } = updates;
+    if (this.loadedConfig) {
+      this.loadedConfig.deploy = deploy;
+      this.loadedConfig.mcp = mcp;
+    }
+    const { deploy: _deploy, mcp: _mcp, ...restartUpdates } = updates;
     if (Object.keys(restartUpdates).length > 0) this.pendingChanges = { ...(this.pendingChanges ?? {}), ...restartUpdates };
   }
 

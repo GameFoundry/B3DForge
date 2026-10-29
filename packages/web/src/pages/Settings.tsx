@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useServerConfig, useUpdateServerConfig, useValidateDataPath } from '../hooks/useConfig';
 import { AgentTokens } from '../components/AgentTokens';
 import { DeploySettings } from '../components/DeploySettings';
+import { McpSettings } from '../components/McpSettings';
 
 export function Settings() {
   const { data: config, isLoading } = useServerConfig();
@@ -184,6 +185,9 @@ export function Settings() {
 
       {/* Agent Tokens */}
       <AgentTokens />
+
+      {/* MCP endpoint and tokens */}
+      <McpSettings />
 
       {/* Server Info */}
       <div className="bg-gray-800 rounded-lg p-6">

@@ -8,8 +8,17 @@ interface AgentTokensFile {
 	tokens: AgentToken[];
 }
 
-const FILE_PATH = 'auth/agent-tokens.json';
-const TOKEN_PREFIX = 'bsf_agt_';
+/** Where a kind of bearer token is stored and the prefix its plaintext carries. */
+export interface BearerTokenKind {
+	filePath: string;
+	prefix: string;
+}
+
+/** Tokens build agents authenticate with. */
+export const AGENT_TOKEN_KIND: BearerTokenKind = { filePath: 'auth/agent-tokens.json', prefix: 'bsf_agt_' };
+
+/** Tokens MCP clients (coding agents) authenticate with. Kept apart so an MCP client can never act as a build agent. */
+export const MCP_TOKEN_KIND: BearerTokenKind = { filePath: 'auth/mcp-tokens.json', prefix: 'bsf_mcp_' };
 
 function toPublic(token: AgentToken): AgentTokenPublic {
 	return {
@@ -27,17 +36,17 @@ export interface CreatedAgentToken {
 }
 
 export class AgentTokensRepository {
-	constructor(private storage: JsonFileStorage) {}
+	constructor(private storage: JsonFileStorage, private kind: BearerTokenKind = AGENT_TOKEN_KIND) {}
 
 	async list(): Promise<AgentTokenPublic[]> {
-		const data = await this.storage.read<AgentTokensFile>(FILE_PATH, { tokens: [] });
+		const data = await this.storage.read<AgentTokensFile>(this.kind.filePath, { tokens: [] });
 		return data.tokens.map(toPublic);
 	}
 
 	async create(name: string): Promise<CreatedAgentToken> {
-		const data = await this.storage.read<AgentTokensFile>(FILE_PATH, { tokens: [] });
+		const data = await this.storage.read<AgentTokensFile>(this.kind.filePath, { tokens: [] });
 		const secret = randomBytes(32).toString('hex');
-		const plaintext = `${TOKEN_PREFIX}${secret}`;
+		const plaintext = `${this.kind.prefix}${secret}`;
 		const tokenHash = await hashPassword(secret);
 		const record: AgentToken = {
 			id: generateAgentTokenId(),
@@ -46,26 +55,26 @@ export class AgentTokensRepository {
 			createdAt: new Date().toISOString(),
 		};
 		data.tokens.push(record);
-		await this.storage.write<AgentTokensFile>(FILE_PATH, data);
+		await this.storage.write<AgentTokensFile>(this.kind.filePath, data);
 		return { record: toPublic(record), plaintext };
 	}
 
 	async revoke(id: string): Promise<boolean> {
-		const data = await this.storage.read<AgentTokensFile>(FILE_PATH, { tokens: [] });
+		const data = await this.storage.read<AgentTokensFile>(this.kind.filePath, { tokens: [] });
 		const index = data.tokens.findIndex(t => t.id === id);
 		if (index === -1) return false;
 		data.tokens.splice(index, 1);
-		await this.storage.write<AgentTokensFile>(FILE_PATH, data);
+		await this.storage.write<AgentTokensFile>(this.kind.filePath, data);
 		return true;
 	}
 
 	/** Look up a token record by its plaintext. Returns null if no token matches. */
 	async findByPlaintext(plaintext: string): Promise<AgentToken | null> {
-		if (!plaintext.startsWith(TOKEN_PREFIX)) return null;
-		const secret = plaintext.slice(TOKEN_PREFIX.length);
+		if (!plaintext.startsWith(this.kind.prefix)) return null;
+		const secret = plaintext.slice(this.kind.prefix.length);
 		if (!secret) return null;
 
-		const data = await this.storage.read<AgentTokensFile>(FILE_PATH, { tokens: [] });
+		const data = await this.storage.read<AgentTokensFile>(this.kind.filePath, { tokens: [] });
 		for (const token of data.tokens) {
 			if (await verifyPassword(secret, token.tokenHash))
 				return token;
@@ -74,7 +83,7 @@ export class AgentTokensRepository {
 	}
 
 	async updateLastUsed(id: string): Promise<void> {
-		const data = await this.storage.read<AgentTokensFile>(FILE_PATH, { tokens: [] });
+		const data = await this.storage.read<AgentTokensFile>(this.kind.filePath, { tokens: [] });
 		const token = data.tokens.find(t => t.id === id);
 		if (!token) return;
 		const now = new Date();
@@ -82,6 +91,6 @@ export class AgentTokensRepository {
 		// Throttle writes to once per minute
 		if (now.getTime() - lastUsedMs <= 60 * 1000) return;
 		token.lastUsedAt = now.toISOString();
-		await this.storage.write<AgentTokensFile>(FILE_PATH, data);
+		await this.storage.write<AgentTokensFile>(this.kind.filePath, data);
 	}
 }

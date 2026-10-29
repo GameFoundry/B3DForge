@@ -190,6 +190,29 @@ include `deploy.sh`) under `{buildsRoot}/{buildId}`.
 - `GET /api/v1/projects/:slug/builds/:id/test-results` - Get test results
 - `GET /api/v1/projects/:slug/builds/:id/snapshots/:name/comparison` - Image diff
 
+### Tokens
+- `GET/POST /api/v1/agent-tokens`, `DELETE /api/v1/agent-tokens/:id` - Build agent tokens (`bsf_agt_`)
+- `GET/POST /api/v1/mcp-tokens`, `DELETE /api/v1/mcp-tokens/:id` - MCP client tokens (`bsf_mcp_`, `auth/mcp-tokens.json`)
+
+## MCP Endpoint
+
+`packages/server/src/mcp/mcp-routes.ts` serves MCP (Streamable HTTP, stateless: a fresh
+`McpServer` per POST) at `/mcp` on the main server. It authenticates with an MCP token as a
+Bearer header (never a session cookie or an agent token) and answers 404 while
+`config.mcp.enabled` is false (Settings → MCP, applied without a restart). Tools:
+
+- Read: `list_projects` (configurations, platforms, settings schema), `list_platforms`,
+  `list_builds` (pending ones carry queue position and pending reason), `get_build` (phases,
+  main repository and submodule commits, group members, test summaries), `get_build_log` (build,
+  unit test or snapshot log; phase/level/regex filters, tail or offset paging),
+  `get_unit_test_results`, `get_snapshot_results` (with reference diff percentages),
+  `get_snapshot_image` (screenshot, reference or diff PNG), `wait_for_builds` (long poll, up to
+  an hour, progress notifications)
+- Write: `trigger_builds` (explicit platforms; settings validated against the configuration's
+  `configSchema` and merged over its defaults; no auto-deploy), `cancel_builds`
+
+Triggers and cancels are audited as `mcp:<token name>`, which is also the build's `triggeredBy`.
+
 ## Socket.IO Events
 
 **Client → Server:**
@@ -271,7 +294,8 @@ Server config in `config.json`:
 Environment overrides: `DATA_PATH`, `PORT`, `DEPLOY_CREDENTIALS_FILE`, `MAX_DEPLOYMENT_UPLOAD_BYTES`.
 
 `config.json` also holds `deploy: { credentialsFile }`, editable under Settings → Deployment
-without a restart. The server reads only `GIT_TOKEN`/`GIT_USER` from that file; the rest is for
+without a restart, and `mcp: { enabled }` (default true), editable under Settings → MCP without
+a restart. The server reads only `GIT_TOKEN`/`GIT_USER` from that file; the rest is for
 `deploy.sh`. See `DEPLOYMENT.md` section 7 for pins, deployments and promotion.
 
 ## Testing the Forge itself
